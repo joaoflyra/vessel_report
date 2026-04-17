@@ -1,0 +1,28 @@
+name: Daily Vessel Report
+
+on:
+  schedule:
+    - cron: '0 13 * * 1-5'  # 10:00 horario de Brasilia (UTC-3), segunda a sexta
+  workflow_dispatch:          # permite rodar manualmente
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install anthropic openpyxl
+
+      - name: Run vessel report
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REPORT_RECIPIENT: ${{ secrets.REPORT_RECIPIENT }}
+        run: python vessel_report.py
