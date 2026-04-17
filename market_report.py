@@ -191,11 +191,7 @@ Retorne APENAS um JSON válido, sem texto antes ou depois, seguindo este schema:
       "notes": ""
     }}
   ],
-  "highlights": [
-    "destaque 1",
-    "destaque 2",
-    "destaque 3"
-  ]
+  "highlights": []
 }}
 
 ---
@@ -205,6 +201,64 @@ Emails ({len(emails)} total):
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=16000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    text = response.content[0].text.strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    data = json.loads(text)
+
+    # gera destaques com Sonnet (melhor analise)
+    data["highlights"] = generate_highlights(data, email_content)
+    return data
+
+
+def generate_highlights(data, email_content):
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    s = data["summary"]
+
+    tonnage_summary = "\n".join([
+        f"- {v['vessel']} / {v['dwt']} DWT / {v['size_class']} — Aberto {v['open_port']} {v['open_date']} ({v['region']})"
+        for v in data.get("tonnage", [])
+    ])
+    orders_summary = "\n".join([
+        f"- {o['quantity']} {o['cargo']} {o['load_port']}->{o['discharge_port']} laycan {o['laycan']} ({o['size_class']})"
+        for o in data.get("orders", [])
+    ])
+    cargo_summary = "\n".join([
+        f"- {c['quantity']} {c['cargo']} {c['load_port']}->{c['discharge_port']} laycan {c['laycan']}"
+        for c in data.get("cargo_offers", [])
+    ])
+
+    prompt = f"""Você é um analista sênior de mercado de fretes maritimos dry bulk.
+
+Com base nos dados extraídos abaixo, escreva de 4 a 6 destaques analíticos do dia.
+Seja perspicaz — identifique tendências, concentrações, desequilíbrios oferta/demanda, rotas em destaque, níveis de frete mencionados, comportamento de brokers específicos.
+
+Dados extraídos:
+- Total emails broker: {s['broker_emails']}
+- Tonelagem ofertada: {s['tonnage_count']} navios
+- Ordens de frete: {s['orders_count']}
+- Ofertas de carga: {s['cargo_offers_count']}
+
+TONNAGE:
+{tonnage_summary or 'nenhuma'}
+
+ORDERS:
+{orders_summary or 'nenhuma'}
+
+CARGO OFFERS:
+{cargo_summary or 'nenhuma'}
+
+Retorne APENAS uma lista JSON de strings, sem texto adicional:
+["destaque 1", "destaque 2", "destaque 3"]"""
+
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1000,
         messages=[{"role": "user", "content": prompt}],
     )
 
