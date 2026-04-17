@@ -4,14 +4,35 @@ import smtplib
 import email
 import email.header
 import os
+import json
+import io
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    HRFlowable, KeepTogether
+)
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 GMAIL_USER = os.environ.get("GMAIL_USER", "joao@lyrashipping.com.br")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 REPORT_RECIPIENT = os.environ.get("REPORT_RECIPIENT", GMAIL_USER)
+
+NAVY = colors.HexColor("#1a2e4a")
+BLUE = colors.HexColor("#2c5f8a")
+LIGHT = colors.HexColor("#eaf2fb")
+ACCENT = colors.HexColor("#e8f0e8")
+WHITE = colors.white
+GRAY = colors.HexColor("#666666")
+RED = colors.HexColor("#c0392b")
 
 
 def decode_header_value(value):
@@ -39,9 +60,8 @@ def fetch_broker_emails():
         _, msg_data = mail.fetch(msg_id, "(RFC822)")
         msg = email.message_from_bytes(msg_data[0][1])
 
-        subject = decode_header_value(msg.get("Subject", "(sem assunto)"))
+        subject = decode_header_value(msg.get("Subject", ""))
         sender = decode_header_value(msg.get("From", ""))
-        date_str = msg.get("Date", "")
         body = ""
 
         if msg.is_multipart():
@@ -56,155 +76,385 @@ def fetch_broker_emails():
             if payload:
                 body = payload.decode("utf-8", errors="ignore")
 
-        body = body[:2000]
-        emails.append({"subject": subject, "from": sender, "date": date_str, "body": body})
+        emails.append({"subject": subject, "from": sender, "body": body[:600]})
 
     mail.close()
     mail.logout()
-    return emails
+
+    # pre-filtro local: manter apenas emails com conteudo de broker
+    broker_keywords = [
+        "dwt", "laycan", "tonnage", "open ", "aberto", "charter",
+        "vessel", "cargo", "freight", "bulk", "moloo", "molco",
+        "shinc", "fhex", "pwwd", "demurrage", "dispatch",
+        "eta ", "ets ", "etb ", "load port", "disch", "l/d",
+        "bss", "tct", "t/c ", "time charter", "voyage charter",
+        "kamsarmax", "panamax", "supramax", "ultramax", "handysize",
+        "capesize", "geared", "grabber", "scrubber",
+    ]
+
+    filtered = []
+    for e in emails:
+        combined = (e["subject"] + " " + e["body"]).lower()
+        if any(kw in combined for kw in broker_keywords):
+            filtered.append(e)
+
+    print(f"[INFO] Pre-filtro: {len(filtered)} emails com conteudo de broker (de {len(emails)} total)")
+    return filtered
 
 
-def generate_market_report(emails):
+def analyze_market(emails):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     today = datetime.now().strftime("%d/%m/%Y")
 
     email_content = "\n\n---\n\n".join([
         f"De: {e['from']}\nAssunto: {e['subject']}\n\n{e['body']}"
         for e in emails
-    ]) if emails else "Nenhum email recebido."
+    ]) if emails else "Nenhum email."
 
-    prompt = f"""Você é um analista especializado em mercado de fretes maritimos (dry bulk).
+    prompt = f"""Você é um analista de mercado de fretes maritimos (dry bulk).
 
-Analise os emails abaixo recebidos nas últimas 24 horas e gere um relatório de mercado.
+Analise os {len(emails)} emails abaixo e retorne um JSON estruturado com os dados de mercado.
 
-Primeiro, identifique quais emails são de brokers maritimos. Use critério AMPLO — qualquer email que contenha ofertas de navio, ordens de carga, fixturamentos ou circulares de mercado deve ser considerado broker.
+REGRAS:
+- Identifique emails de brokers com critério AMPLO. Brokers incluem: Clarksons, SSY, Fearnleys, Braemar, Howe Robinson, BRS, Banchero Costa, DHP Maritime, North Harbour Shipping, Prime Shipping & Chartering (chartering@primeshipping.org), Niavigrains, Skyhi Shipping, Guanabara Shipping, Teomare, Smarship, Ifchor Galbraiths, G.Moundreas, PNA Shipbrokers, United Seas Corp, Grain Compass, Laasco Dry, e qualquer remetente com conteúdo de circular maritima (tonnage, laycan, DWT, L/D, etc.).
+- Em caso de dúvida, INCLUA.
+- Extraia APENAS: ofertas de navio (tonnage), procuras de navio (orders), ofertas de carga (cargo offer).
+- NAO inclua procuras de carga (cargo wanted/backhaul/TCT seeking cargo).
 
-Brokers conhecidos (mas não limitado a estes):
-Clarksons, SSY, Fearnleys, Braemar, Howe Robinson, BRS, Banchero Costa, Poten, Barry Rogliano, ACM, Maersk Broker, Simpson Spence Young, Intermodal, Compass Maritime, Ifchor, Galbraiths, DHP Maritime, North Harbour Shipping, Prime Shipping & Chartering (chartering@primeshipping.org), Niavigrains Chartering, Skyhi Shipping, Guanabara Shipping, e qualquer outro remetente com conteúdo típico de circular de mercado maritimo (tonnage, orders, laycan, DWT, L/D rates, etc.).
-
-Em caso de dúvida sobre se um email é de broker, INCLUA — é melhor incluir do que ignorar.
-
-De cada email de broker, extraia APENAS estes 3 tipos de itens:
-- Ofertas de navio (tonnage): navio disponivel com porto/data de abertura
-- Procuras de navio (orders): cargo buscando navio
-- Ofertas de carga (cargo offer): carga disponivel buscando navio
-
-NAO inclua "procuras de carga" (cargo wanted / backhaul). Ignore completamente esses itens.
-
-Classifique cada navio por porte:
+Porte dos navios:
 - Capesize: 100.000+ DWT
-- Panamax / Kamsarmax: 65.000-99.999 DWT
-- Supramax / Ultramax: 45.000-64.999 DWT
+- Panamax/Kamsarmax: 65.000-99.999 DWT
+- Supramax/Ultramax: 45.000-64.999 DWT
 - Handysize: abaixo de 45.000 DWT
 
-Classifique por região:
-- Américas (ECSA = Costa Leste América do Sul, WCSA, USG, USEC)
+Regiões:
+- Americas (ECSA)  — Costa Leste América do Sul (Brasil, Argentina, Uruguai)
+- Americas (USG/USEC) — Golfo e Costa Leste EUA
+- Americas (Outros) — Caribe, WCSA, América Central
 - Europa / Mediterrâneo
-- Ásia (Far East, Southeast Asia)
-- Oceania (Austrália, Nova Zelândia)
+- Ásia (Far East)
+- Ásia (Outros) — SE Asia, Sul da Asia
 - Oriente Médio / Índia
 - África
+- Oceania
 
-Gere o relatório seguindo EXATAMENTE este formato (texto simples, sem markdown):
+Retorne APENAS um JSON válido, sem texto antes ou depois, seguindo este schema:
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LYRA SHIPPING  ·  RELATORIO DE MERCADO  ·  {today}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-RESUMO EXECUTIVO
-  E-mails de brokers analisados: [N]
-  Itens individuais extraídos:   [N]
-    Ofertas de navio (tonnage):       [N]
-    Procuras de navio (orders):       [N]
-    Ofertas de carga (cargo offer):   [N]
-
-══════════════════════════════════════════════
-OFERTAS DE NAVIO (TONNAGE)
-══════════════════════════════════════════════
-
-[Por porte, depois por região, apenas onde houver itens:]
-
-CAPESIZE
-  Americas (ECSA / USG)
-    - [Nome navio] / [DWT] / [ano construção] — Aberto [porto] [data] — Broker: [nome]
-  Asia (Far East)
-    - ...
-
-PANAMAX / KAMSARMAX
-  ...
-
-SUPRAMAX / ULTRAMAX
-  ...
-
-HANDYSIZE
-  ...
-
-══════════════════════════════════════════════
-PROCURAS DE NAVIO (ORDERS)
-══════════════════════════════════════════════
-
-[Por porte, depois por região:]
-
-CAPESIZE
-  Americas (ECSA)
-    - [quantidade] [tipo de carga] [porto carga]/[porto descarga] — laycan [datas] — Charterer: [se conhecido] — Broker: [nome]
-  ...
-
-PANAMAX / KAMSARMAX
-  ...
-
-══════════════════════════════════════════════
-OFERTAS DE CARGA (CARGO OFFER)
-══════════════════════════════════════════════
-
-[Por região de carregamento:]
-
-  Americas (ECSA / USG)
-    - [quantidade] [tipo carga] [porto carga]/[porto descarga] — laycan [datas] — Shipper: [se conhecido] — Broker: [nome]
-  ...
-
-══════════════════════════════════════════════
-DESTAQUES DO DIA
-══════════════════════════════════════════════
-- [3 a 5 bullets com movimentos mais relevantes: concentração de ordens, niveis de frete mencionados, tendências, padrões]
-
-══════════════════════════════════════════════
-AUDITORIA
-══════════════════════════════════════════════
-  E-mails ignorados (nao-broker): [N]
-  E-mails de broker sem item extraível: [N]
-
-Se não houver emails de brokers suficientes, indique claramente e faça um resumo do que foi encontrado.
+{{
+  "summary": {{
+    "total_emails": {len(emails)},
+    "broker_emails": 0,
+    "ignored_emails": 0,
+    "tonnage_count": 0,
+    "orders_count": 0,
+    "cargo_offers_count": 0
+  }},
+  "brokers_seen": ["broker1", "broker2"],
+  "tonnage": [
+    {{
+      "vessel": "MV NOME",
+      "dwt": 57000,
+      "year": 2013,
+      "size_class": "Supramax/Ultramax",
+      "open_port": "Paranagua",
+      "open_date": "20-25 Abr",
+      "region": "Americas (ECSA)",
+      "broker": "Clarksons Hellas",
+      "notes": "graos, limpo"
+    }}
+  ],
+  "orders": [
+    {{
+      "cargo": "Iron Ore",
+      "quantity": "170.000 MT",
+      "load_port": "Dampier",
+      "discharge_port": "Qingdao",
+      "laycan": "01-03 Mai",
+      "charterer": "Rio Tinto",
+      "size_class": "Capesize",
+      "region": "Oceania",
+      "broker": "Prime S&C",
+      "type": "voyage",
+      "notes": ""
+    }}
+  ],
+  "cargo_offers": [
+    {{
+      "cargo": "Soja em bags",
+      "quantity": "25.000 MT",
+      "load_port": "Paranagua",
+      "discharge_port": "Jeddah",
+      "laycan": "26 Abr-05 Mai",
+      "shipper": "n/i",
+      "region": "Americas (ECSA)",
+      "broker": "Prime S&C",
+      "notes": ""
+    }}
+  ],
+  "highlights": [
+    "destaque 1",
+    "destaque 2",
+    "destaque 3"
+  ]
+}}
 
 ---
-Emails recebidos nas últimas 24 horas ({len(emails)} emails):
+Emails ({len(emails)} total):
 {email_content}"""
 
     response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=8000,
+        model="claude-haiku-4-5-20251001",
+        max_tokens=16000,
         messages=[{"role": "user", "content": prompt}],
     )
 
-    return response.content[0].text
+    text = response.content[0].text.strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return json.loads(text)
 
 
-def send_report(report_text):
+def build_pdf(data):
     today = datetime.now().strftime("%d/%m/%Y")
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"Relatorio de Mercado — {today}"
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=1.8*cm, rightMargin=1.8*cm,
+        topMargin=1.5*cm, bottomMargin=1.5*cm
+    )
+
+    styles = getSampleStyleSheet()
+    s_title = ParagraphStyle("title", fontSize=18, textColor=WHITE, alignment=TA_CENTER, fontName="Helvetica-Bold", spaceAfter=2)
+    s_sub   = ParagraphStyle("sub", fontSize=10, textColor=LIGHT, alignment=TA_CENTER, fontName="Helvetica", spaceAfter=0)
+    s_sec   = ParagraphStyle("sec", fontSize=11, textColor=WHITE, fontName="Helvetica-Bold", spaceBefore=4, spaceAfter=4, leftIndent=4)
+    s_sub2  = ParagraphStyle("sub2", fontSize=9.5, textColor=NAVY, fontName="Helvetica-Bold", spaceBefore=6, spaceAfter=2)
+    s_body  = ParagraphStyle("body", fontSize=8.5, textColor=colors.black, fontName="Helvetica", spaceAfter=2, leading=12)
+    s_hl    = ParagraphStyle("hl", fontSize=9, textColor=colors.black, fontName="Helvetica", leftIndent=10, spaceAfter=3, leading=13)
+    s_note  = ParagraphStyle("note", fontSize=8, textColor=GRAY, fontName="Helvetica-Oblique", spaceAfter=2)
+
+    story = []
+
+    # Header
+    header_data = [[Paragraph(f"LYRA SHIPPING", s_title)], [Paragraph(f"Relatório de Mercado — {today}", s_sub)]]
+    header_table = Table(header_data, colWidths=[doc.width])
+    header_table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,-1), NAVY),
+        ("TOPPADDING", (0,0), (-1,-1), 10),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 10),
+        ("LEFTPADDING", (0,0), (-1,-1), 10),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 0.4*cm))
+
+    # Summary boxes
+    s = data["summary"]
+    boxes = [
+        ["Emails\nAnalisados", str(s["total_emails"])],
+        ["Brokers\nIdentificados", str(s["broker_emails"])],
+        ["Ofertas\nde Navio", str(s["tonnage_count"])],
+        ["Procuras\nde Navio", str(s["orders_count"])],
+        ["Ofertas\nde Carga", str(s["cargo_offers_count"])],
+    ]
+    box_style = ParagraphStyle("bk", fontSize=8, textColor=GRAY, alignment=TA_CENTER, fontName="Helvetica")
+    box_num   = ParagraphStyle("bn", fontSize=20, textColor=NAVY, alignment=TA_CENTER, fontName="Helvetica-Bold")
+
+    box_cells = [[
+        [Paragraph(b[1], box_num), Paragraph(b[0], box_style)]
+        for b in boxes
+    ]]
+    col_w = doc.width / len(boxes)
+    summary_table = Table(box_cells, colWidths=[col_w]*len(boxes), rowHeights=[1.4*cm])
+    summary_table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,-1), LIGHT),
+        ("BOX", (0,0), (-1,-1), 0.5, BLUE),
+        ("INNERGRID", (0,0), (-1,-1), 0.5, WHITE),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("ALIGN", (0,0), (-1,-1), "CENTER"),
+        ("TOPPADDING", (0,0), (-1,-1), 4),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 0.4*cm))
+
+    def section_header(title):
+        t = Table([[Paragraph(title, s_sec)]], colWidths=[doc.width])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), BLUE),
+            ("TOPPADDING", (0,0), (-1,-1), 5),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+            ("LEFTPADDING", (0,0), (-1,-1), 8),
+        ]))
+        return t
+
+    def count_table(items, key):
+        from collections import Counter
+        counts = Counter(i[key] for i in items)
+        if not counts:
+            return None
+        rows = [["", "Quantidade"]]
+        for k, v in sorted(counts.items(), key=lambda x: -x[1]):
+            rows.append([k, str(v)])
+        t = Table(rows, colWidths=[doc.width * 0.75, doc.width * 0.25])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), NAVY),
+            ("TEXTCOLOR", (0,0), (-1,0), WHITE),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("FONTSIZE", (0,0), (-1,-1), 8),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [WHITE, LIGHT]),
+            ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#cccccc")),
+            ("ALIGN", (1,0), (1,-1), "CENTER"),
+            ("TOPPADDING", (0,0), (-1,-1), 3),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+            ("LEFTPADDING", (0,0), (-1,-1), 6),
+        ]))
+        return t
+
+    # ── TONNAGE ──────────────────────────────────
+    tonnage = data.get("tonnage", [])
+    if tonnage:
+        story.append(section_header(f"OFERTAS DE NAVIO — TONNAGE   ({len(tonnage)} navios)"))
+        story.append(Spacer(1, 0.2*cm))
+
+        # count by size
+        story.append(Paragraph("Por porte:", s_sub2))
+        ct = count_table(tonnage, "size_class")
+        if ct:
+            story.append(ct)
+        story.append(Spacer(1, 0.2*cm))
+
+        # count by region
+        story.append(Paragraph("Por região:", s_sub2))
+        cr = count_table(tonnage, "region")
+        if cr:
+            story.append(cr)
+        story.append(Spacer(1, 0.3*cm))
+
+        # listing by size + region
+        from collections import defaultdict
+        by_size = defaultdict(lambda: defaultdict(list))
+        size_order = ["Capesize", "Panamax/Kamsarmax", "Supramax/Ultramax", "Handysize"]
+        for v in tonnage:
+            by_size[v["size_class"]][v["region"]].append(v)
+
+        for sz in size_order:
+            if sz not in by_size:
+                continue
+            story.append(Paragraph(f"▸  {sz}", s_sub2))
+            for region, vessels in sorted(by_size[sz].items()):
+                story.append(Paragraph(f"{region}  ({len(vessels)})", ParagraphStyle("rg", fontSize=8.5, textColor=BLUE, fontName="Helvetica-Bold", leftIndent=12, spaceAfter=1)))
+                for v in vessels:
+                    yr = f" / {v['year']}" if v.get("year") else ""
+                    note = f"  —  {v['notes']}" if v.get("notes") else ""
+                    line = f"<b>{v['vessel']}</b>  /  {v['dwt']:,} DWT{yr}  —  Aberto {v['open_port']} {v['open_date']}{note}  —  <i>Broker: {v['broker']}</i>"
+                    story.append(Paragraph(line, ParagraphStyle("vl", fontSize=8, fontName="Helvetica", leftIndent=24, spaceAfter=2, leading=11)))
+        story.append(Spacer(1, 0.4*cm))
+
+    # ── ORDERS ───────────────────────────────────
+    orders = data.get("orders", [])
+    if orders:
+        story.append(section_header(f"PROCURAS DE NAVIO — ORDERS   ({len(orders)} ordens)"))
+        story.append(Spacer(1, 0.2*cm))
+
+        story.append(Paragraph("Por porte:", s_sub2))
+        ct = count_table(orders, "size_class")
+        if ct: story.append(ct)
+        story.append(Spacer(1, 0.2*cm))
+
+        story.append(Paragraph("Por região:", s_sub2))
+        cr = count_table(orders, "region")
+        if cr: story.append(cr)
+        story.append(Spacer(1, 0.3*cm))
+
+        by_size = defaultdict(list)
+        for o in orders:
+            by_size[o["size_class"]].append(o)
+
+        for sz in size_order:
+            if sz not in by_size:
+                continue
+            story.append(Paragraph(f"▸  {sz}", s_sub2))
+            for o in by_size[sz]:
+                tp = " (T/C)" if o.get("type") == "tct" else ""
+                ch = f"  —  Charterer: {o['charterer']}" if o.get("charterer") and o["charterer"] not in ("n/i", "n/d", "") else ""
+                note = f"  —  {o['notes']}" if o.get("notes") else ""
+                line = (f"<b>{o['quantity']}</b> {o['cargo']}{tp}  —  "
+                        f"{o['load_port']} → {o['discharge_port']}  —  "
+                        f"Laycan: {o['laycan']}{ch}{note}  —  "
+                        f"<i>Broker: {o['broker']}</i>")
+                story.append(Paragraph(line, ParagraphStyle("ol", fontSize=8, fontName="Helvetica", leftIndent=16, spaceAfter=3, leading=11)))
+        story.append(Spacer(1, 0.4*cm))
+
+    # ── CARGO OFFERS ─────────────────────────────
+    cargo = data.get("cargo_offers", [])
+    if cargo:
+        story.append(section_header(f"OFERTAS DE CARGA — CARGO OFFER   ({len(cargo)} itens)"))
+        story.append(Spacer(1, 0.2*cm))
+
+        story.append(Paragraph("Por região de carregamento:", s_sub2))
+        cr = count_table(cargo, "region")
+        if cr: story.append(cr)
+        story.append(Spacer(1, 0.3*cm))
+
+        by_region = defaultdict(list)
+        for c in cargo:
+            by_region[c["region"]].append(c)
+
+        for region, items in sorted(by_region.items()):
+            story.append(Paragraph(f"▸  {region}  ({len(items)})", s_sub2))
+            for c in items:
+                sh = f"  —  Shipper: {c['shipper']}" if c.get("shipper") and c["shipper"] not in ("n/i", "n/d", "") else ""
+                note = f"  —  {c['notes']}" if c.get("notes") else ""
+                line = (f"<b>{c['quantity']}</b> {c['cargo']}  —  "
+                        f"{c['load_port']} → {c['discharge_port']}  —  "
+                        f"Laycan: {c['laycan']}{sh}{note}  —  "
+                        f"<i>Broker: {c['broker']}</i>")
+                story.append(Paragraph(line, ParagraphStyle("cl", fontSize=8, fontName="Helvetica", leftIndent=16, spaceAfter=3, leading=11)))
+        story.append(Spacer(1, 0.4*cm))
+
+    # ── HIGHLIGHTS ───────────────────────────────
+    highlights = data.get("highlights", [])
+    if highlights:
+        story.append(section_header("DESTAQUES DO DIA"))
+        story.append(Spacer(1, 0.2*cm))
+        for h in highlights:
+            story.append(Paragraph(f"•  {h}", s_hl))
+        story.append(Spacer(1, 0.4*cm))
+
+    # ── BROKERS ──────────────────────────────────
+    brokers = data.get("brokers_seen", [])
+    if brokers:
+        story.append(section_header("BROKERS IDENTIFICADOS"))
+        story.append(Spacer(1, 0.2*cm))
+        story.append(Paragraph(", ".join(sorted(brokers)), s_note))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
+
+def send_report(pdf_bytes):
+    today = datetime.now().strftime("%d/%m/%Y")
+    today_file = datetime.now().strftime("%Y-%m-%d")
+
+    msg = MIMEMultipart()
+    msg["Subject"] = f"Relatório de Mercado — {today}"
     msg["From"] = GMAIL_USER
     msg["To"] = REPORT_RECIPIENT
 
-    html = f"<html><body><pre style='font-family:monospace;font-size:14px'>{report_text}</pre></body></html>"
-    msg.attach(MIMEText(report_text, "plain", "utf-8"))
-    msg.attach(MIMEText(html, "html", "utf-8"))
+    body = MIMEText(f"Relatório de mercado em anexo — {today}", "plain", "utf-8")
+    msg.attach(body)
+
+    pdf_part = MIMEApplication(pdf_bytes, _subtype="pdf")
+    pdf_part.add_header("Content-Disposition", "attachment", filename=f"mercado_{today_file}.pdf")
+    msg.attach(pdf_part)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_USER, REPORT_RECIPIENT, msg.as_string())
 
-    print(f"[OK] Relatorio de mercado enviado para {REPORT_RECIPIENT}")
+    print(f"[OK] PDF enviado para {REPORT_RECIPIENT}")
 
 
 if __name__ == "__main__":
@@ -218,11 +468,13 @@ if __name__ == "__main__":
         exit(1)
 
     emails = fetch_broker_emails()
-    print(f"[INFO] {len(emails)} email(s) encontrado(s) nas ultimas 24h.")
+    print(f"[INFO] {len(emails)} emails encontrados.")
 
-    report = generate_market_report(emails)
-    print("\n--- RELATORIO GERADO ---")
-    print(report.encode("cp1252", errors="replace").decode("cp1252"))
-    print("------------------------\n")
+    data = analyze_market(emails)
+    s = data["summary"]
+    print(f"[INFO] Brokers: {s['broker_emails']} | Tonnage: {s['tonnage_count']} | Orders: {s['orders_count']} | Cargo: {s['cargo_offers_count']}")
 
-    send_report(report)
+    pdf = build_pdf(data)
+    print(f"[INFO] PDF gerado ({len(pdf):,} bytes)")
+
+    send_report(pdf)
