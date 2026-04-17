@@ -184,7 +184,8 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {today}
   - maximo 4 bullets
 
   PROXIMA VIAGEM
-  - Carga: [tipo e quantidade]  |  Cliente: [se disponivel]
+  - Tipo: [Voyage Charter / Time Charter]  |  Cliente: [se disponivel]
+  - Carga: [tipo e quantidade, se voyage charter]
   - [Porto de carga] -> [Porto de descarga]
   (omitir se nao houver informacao)
 
