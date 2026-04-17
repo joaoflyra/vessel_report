@@ -35,7 +35,7 @@ def fetch_broker_emails():
 
     emails = []
     ids = message_ids[0].split()
-    for msg_id in ids[-150:]:
+    for msg_id in ids:
         _, msg_data = mail.fetch(msg_id, "(RFC822)")
         msg = email.message_from_bytes(msg_data[0][1])
 
