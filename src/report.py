@@ -8,7 +8,7 @@ import anthropic
 
 GMAIL_USER = os.environ["GMAIL_USER"]
 GMAIL_TO = os.environ["GMAIL_TO"]
-GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
+GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"].replace(" ", "").replace("\xa0", "").strip()
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 BRASILIA = timezone(timedelta(hours=-3))
