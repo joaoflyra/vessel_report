@@ -180,25 +180,44 @@ INSTRUCOES:
    - Em caso de duvida sobre posicao, status ou proxima escala do navio, use a POSITION LIST como referencia definitiva
    - Se a position list contradiz os emails, destaque a contradição e mencione ambas as fontes
 
-5. FORMATO POR NAVIO:
-[EMOJI]  M/V [NOME]
-  Status    [descricao]
-  Rota      [origem -> destino]  |  [viagem]  |  [carga]
+5. FORMATO POR NAVIO (siga rigorosamente este modelo):
 
-  URGENTE (somente se houver)
-  - [item]
+[EMOJI]  M/V [NOME] · Voy. [NUMERO]
+  Status    [descricao detalhada — porto, berco, operacao em curso]
+  Rota      [origem → destino] | [carga e quantidade] | [viagem]
+
+  URGENTE (somente se houver — use ⚠️ para cada item critico)
+  ⚠️ [item urgente com contexto suficiente para acao imediata]
 
   OPERACIONAL
-  - [progresso da viagem/operacao]
+  - [progresso da operacao com dados concretos: quantidades, percentuais, datas]
+  - [use ✔ para itens confirmados/concluidos]
 
   POSSIVEIS PENDENCIAS (somente se houver suspeita)
   - [item que merece atencao mesmo sem confirmacao]
 
   PROXIMA VIAGEM (somente se relevante)
-  - [detalhes]
+  - [carga, rota, laydays, agente]
 
   PROXIMOS PASSOS
-  - [acoes concretas pendentes]
+  - [acoes concretas e objetivas, com responsavel quando conhecido]
+
+EXEMPLO DE BLOCO BEM FORMATADO:
+🟡  M/V LEFTERIS T · Voy. 019/25
+  Status    Em descarga — Salvador/BA | Proxima escala: Areia Branca/RN
+  Rota      Salvador → Areia Branca/RN | Trigo (descarga) / Sal (carga)
+
+  URGENTE
+  ⚠️ Ballast Water Report (Normam 20) pendente — deve ser enviado ao agente HMS/RN antes de 20/04.
+
+  OPERACIONAL
+  - Descarregado ate 18/04 07:00: 27.187 MT | Saldo: 4.796 MT (de 31.983 MT) | ETC Salvador: 19/04 PM
+  - ETA Areia Branca: 22/04 AM | Zarpe previsto: 19/04
+  - Documentacao pre-chegada: ✔ completa, exceto Ballast Water (pendente)
+
+  PROXIMOS PASSOS
+  - ⚠️ Cobrar Ballast Water Report do Cap. e encaminhar ao HMS/RN antes de 20/04
+  - Confirmar zarpe de Salvador e comunicar ao agente
 
 6. VIAGENS ANTERIORES: Se houver emails sobre viagens ja encerradas (demonstrativos de frete, saldos pendentes), liste ao final:
 
