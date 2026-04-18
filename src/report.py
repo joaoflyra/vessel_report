@@ -26,6 +26,7 @@ def fetch_emails_imap():
 
 def get_vessels_from_position_list(mail):
     """Busca a position list mais recente de Cristiano para identificar navios ativos."""
+    mail.select("inbox")
     ids = set()
     for criteria in [
         '(FROM "cristiano@lyrashipping.com.br" SUBJECT "posicao")',
