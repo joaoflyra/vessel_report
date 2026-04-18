@@ -175,7 +175,12 @@ INSTRUCOES:
    - Nao inclua horarios exatos desnecessarios — mencione apenas datas/periodos relevantes para decisoes
    - Se um assunto apareceu no relatorio anterior e continua em andamento, mantenha-o sem repetir todo o contexto
 
-4. FORMATO POR NAVIO:
+4. PESO DAS INFORMACOES:
+   - Emails mais recentes tem PRIORIDADE sobre emails mais antigos — se houver contradição, prevalece o mais recente
+   - Em caso de duvida sobre posicao, status ou proxima escala do navio, use a POSITION LIST como referencia definitiva
+   - Se a position list contradiz os emails, destaque a contradição e mencione ambas as fontes
+
+5. FORMATO POR NAVIO:
 [EMOJI]  M/V [NOME]
   Status    [descricao]
   Rota      [origem -> destino]  |  [viagem]  |  [carga]
@@ -195,12 +200,12 @@ INSTRUCOES:
   PROXIMOS PASSOS
   - [acoes concretas pendentes]
 
-5. VIAGENS ANTERIORES: Se houver emails sobre viagens ja encerradas (demonstrativos de frete, saldos pendentes), liste ao final:
+6. VIAGENS ANTERIORES: Se houver emails sobre viagens ja encerradas (demonstrativos de frete, saldos pendentes), liste ao final:
 
   PENDENCIAS DE VIAGENS ANTERIORES
   - M/V [NOME] voy [X]: [descricao]
 
-6. Se um navio nao tiver emails nas ultimas 48h, inclua brevemente com status do relatorio anterior se disponivel.
+7. Se um navio nao tiver emails nas ultimas 48h, inclua brevemente com status do relatorio anterior se disponivel.
 
 Cabecalho do relatorio:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
