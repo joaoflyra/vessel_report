@@ -60,8 +60,8 @@ def get_vessels_from_position_list(mail):
                      "ATAYAL", "PIO GRANDE", "ADVENTURER", "LOYALTY", "SEAHEAVEN",
                      "LOWLANDS", "REVENGER", "EKATERINA", "PARANA WARRIOR"]
     found = [v for v in known_vessels if v in body.upper()]
-    if not found:
-        print("Navios nao identificados na position list, usando fallback")
+    if len(found) < 3:
+        print(f"Poucos navios identificados ({found}), usando lista completa de fallback")
         return FALLBACK_VESSELS, body
 
     print(f"Navios na position list: {found}")
