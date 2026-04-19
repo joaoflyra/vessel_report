@@ -2,6 +2,7 @@ import os
 import imaplib
 import smtplib
 import email as email_lib
+import time
 from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
 import anthropic
@@ -81,17 +82,17 @@ def fetch_all_emails(mail, vessels):
             ids.update(data[0].split())
 
         vessel_emails = []
-        for num in sorted(ids)[-15:]:
+        for num in sorted(ids)[-10:]:
             _, msg_data = mail.fetch(num, "(RFC822)")
             msg = email_lib.message_from_bytes(msg_data[0][1])
             body = ""
             if msg.is_multipart():
                 for part in msg.walk():
                     if part.get_content_type() == "text/plain":
-                        body = part.get_payload(decode=True).decode("utf-8", errors="ignore")[:4000]
+                        body = part.get_payload(decode=True).decode("utf-8", errors="ignore")[:2000]
                         break
             else:
-                body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")[:4000]
+                body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")[:2000]
             vessel_emails.append({
                 "subject": str(msg["subject"] or ""),
                 "from": str(msg["from"] or ""),
@@ -107,7 +108,7 @@ def fetch_all_emails(mail, vessels):
 def fetch_previous_report(mail):
     """Busca o relatorio do dia anterior na caixa de enviados."""
     try:
-        mail.select('"[Gmail]/Sent Mail"')
+        mail.select('[Gmail]/Sent Mail')
         _, data = mail.search(None, 'SUBJECT "LYRA SHIPPING . RELATORIO DIARIO"')
         ids = data[0].split()
         if not ids:
@@ -234,12 +235,21 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {TODAY_BR}
 Separador entre navios: ──────────────────────────────────────"""
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=8096,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return message.content[0].text
+    for attempt in range(3):
+        try:
+            message = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=8096,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return message.content[0].text
+        except anthropic.RateLimitError:
+            if attempt < 2:
+                wait = 60 * (attempt + 1)
+                print(f"Rate limit atingido, aguardando {wait}s antes de tentar novamente...")
+                time.sleep(wait)
+            else:
+                raise
 
 
 def send_email(subject, body):
