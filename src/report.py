@@ -82,17 +82,17 @@ def fetch_all_emails(mail, vessels):
             ids.update(data[0].split())
 
         vessel_emails = []
-        for num in sorted(ids)[-10:]:
+        for num in sorted(ids)[-5:]:
             _, msg_data = mail.fetch(num, "(RFC822)")
             msg = email_lib.message_from_bytes(msg_data[0][1])
             body = ""
             if msg.is_multipart():
                 for part in msg.walk():
                     if part.get_content_type() == "text/plain":
-                        body = part.get_payload(decode=True).decode("utf-8", errors="ignore")[:2000]
+                        body = part.get_payload(decode=True).decode("utf-8", errors="ignore")[:800]
                         break
             else:
-                body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")[:2000]
+                body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")[:800]
             vessel_emails.append({
                 "subject": str(msg["subject"] or ""),
                 "from": str(msg["from"] or ""),
@@ -108,7 +108,7 @@ def fetch_all_emails(mail, vessels):
 def fetch_previous_report(mail):
     """Busca o relatorio do dia anterior na caixa de enviados."""
     try:
-        mail.select('[Gmail]/Sent Mail')
+        mail.select('"[Gmail]/Sent Mail"')
         _, data = mail.search(None, 'SUBJECT "LYRA SHIPPING . RELATORIO DIARIO"')
         ids = data[0].split()
         if not ids:
@@ -202,23 +202,6 @@ INSTRUCOES:
 
   PROXIMOS PASSOS
   - [acoes concretas e objetivas, com responsavel quando conhecido]
-
-EXEMPLO DE BLOCO BEM FORMATADO:
-🟡  M/V LEFTERIS T · Voy. 019/25
-  Status    Em descarga — Salvador/BA | Proxima escala: Areia Branca/RN
-  Rota      Salvador → Areia Branca/RN | Trigo (descarga) / Sal (carga)
-
-  URGENTE
-  ⚠️ Ballast Water Report (Normam 20) pendente — deve ser enviado ao agente HMS/RN antes de 20/04.
-
-  OPERACIONAL
-  - Descarregado ate 18/04 07:00: 27.187 MT | Saldo: 4.796 MT (de 31.983 MT) | ETC Salvador: 19/04 PM
-  - ETA Areia Branca: 22/04 AM | Zarpe previsto: 19/04
-  - Documentacao pre-chegada: ✔ completa, exceto Ballast Water (pendente)
-
-  PROXIMOS PASSOS
-  - ⚠️ Cobrar Ballast Water Report do Cap. e encaminhar ao HMS/RN antes de 20/04
-  - Confirmar zarpe de Salvador e comunicar ao agente
 
 6. VIAGENS ANTERIORES: Se houver emails sobre viagens ja encerradas (demonstrativos de frete, saldos pendentes), liste ao final:
 
