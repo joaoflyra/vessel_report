@@ -12,9 +12,12 @@ GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"].replace(" ", "").replace("
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 BRASILIA = timezone(timedelta(hours=-3))
-TODAY_BR = datetime.now(BRASILIA).strftime("%d/%m/%Y")
-TODAY_IMAP = datetime.now(BRASILIA).strftime("%d-%b-%Y")
-SINCE_48H_IMAP = (datetime.now(BRASILIA) - timedelta(hours=48)).strftime("%d-%b-%Y")
+NOW_BR = datetime.now(BRASILIA)
+TODAY_BR = NOW_BR.strftime("%d/%m/%Y")
+
+# Segunda-feira = janela de 72h (cobre o fim de semana); demais dias = 24h
+EMAIL_WINDOW_HOURS = 72 if NOW_BR.weekday() == 0 else 24
+SINCE_IMAP = (NOW_BR - timedelta(hours=EMAIL_WINDOW_HOURS)).strftime("%d-%b-%Y")
 
 FALLBACK_VESSELS = ["HERAKLITOS", "PARAGON", "EKATERINA", "LEFTERIS T", "DAHLIA", "MARCOS DIAS", "CALLIO"]
 
@@ -41,7 +44,6 @@ def get_vessels_from_position_list(mail):
         print("Position list nao encontrada, usando lista de fallback")
         return FALLBACK_VESSELS, ""
 
-    # Pega o email mais recente
     latest = sorted(ids)[-1]
     _, msg_data = mail.fetch(latest, "(RFC822)")
     msg = email_lib.message_from_bytes(msg_data[0][1])
@@ -54,12 +56,11 @@ def get_vessels_from_position_list(mail):
     else:
         body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
 
-    # Extrai nomes de navios conhecidos que aparecem na position list
     known_vessels = ["HERAKLITOS", "PARAGON", "EKATERINA", "LEFTERIS T", "LEFTERIS",
                      "DAHLIA", "MARCOS DIAS", "CALLIO", "RAYS", "APOGEE", "AGIA ELENI",
                      "SEPETIBA", "VANTAGE ROSE", "CHINTANA", "DISCOVERER", "HANZE",
                      "ATAYAL", "PIO GRANDE", "ADVENTURER", "LOYALTY", "SEAHEAVEN",
-                     "LOWLANDS", "REVENGER", "EKATERINA", "PARANA WARRIOR"]
+                     "LOWLANDS", "REVENGER", "PARANA WARRIOR"]
     found = [v for v in known_vessels if v in body.upper()]
     if len(found) < 3:
         print(f"Poucos navios identificados ({found}), usando lista completa de fallback")
@@ -70,14 +71,14 @@ def get_vessels_from_position_list(mail):
 
 
 def fetch_all_emails(mail, vessels):
-    """Busca emails das ultimas 48h sobre cada navio."""
+    """Busca emails da janela definida (24h normais, 72h nas segundas) sobre cada navio."""
     mail.select("inbox")
     emails_by_vessel = {}
 
     for vessel in vessels:
         ids = set()
         for criteria in [f'SUBJECT "{vessel}"', f'BODY "{vessel}"']:
-            _, data = mail.search(None, f'(SINCE "{SINCE_48H_IMAP}" {criteria})')
+            _, data = mail.search(None, f'(SINCE "{SINCE_IMAP}" {criteria})')
             ids.update(data[0].split())
 
         vessel_emails = []
@@ -104,11 +105,11 @@ def fetch_all_emails(mail, vessels):
     return emails_by_vessel
 
 
-def fetch_previous_report(mail):
-    """Busca o relatorio do dia anterior na caixa de enviados."""
+def fetch_previous_briefing(mail):
+    """Busca o briefing do dia anterior na caixa de enviados."""
     try:
         mail.select('"[Gmail]/Sent Mail"')
-        _, data = mail.search(None, 'SUBJECT "LYRA SHIPPING . RELATORIO DIARIO"')
+        _, data = mail.search(None, 'SUBJECT "Briefing da Frota"')
         ids = data[0].split()
         if not ids:
             return ""
@@ -119,124 +120,147 @@ def fetch_previous_report(mail):
         if msg.is_multipart():
             for part in msg.walk():
                 if part.get_content_type() == "text/plain":
-                    body = part.get_payload(decode=True).decode("utf-8", errors="ignore")[:5000]
+                    body = part.get_payload(decode=True).decode("utf-8", errors="ignore")[:3000]
                     break
         else:
-            body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")[:5000]
-        print(f"Relatorio anterior encontrado: {msg['subject']}")
+            body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")[:3000]
+        print(f"Briefing anterior encontrado: {msg['subject']}")
         return body
     except Exception as e:
-        print(f"Nao foi possivel buscar relatorio anterior: {e}")
+        print(f"Nao foi possivel buscar briefing anterior: {e}")
         return ""
 
 
-def generate_report(emails_by_vessel, position_list_body="", previous_report=""):
+def generate_briefing(emails_by_vessel, position_list_body="", previous_briefing=""):
     emails_text = ""
     for vessel, emails in emails_by_vessel.items():
         emails_text += f"\n\n=== {vessel} ===\n"
         if not emails:
-            emails_text += "Sem emails nas ultimas 48h.\n"
+            emails_text += f"Sem emails nas ultimas {EMAIL_WINDOW_HOURS}h.\n"
         for e in emails:
             emails_text += f"\nAssunto: {e['subject']}\nDe: {e['from']}\nData: {e['date']}\n{e['body']}\n---\n"
 
     position_list_section = ""
     if position_list_body:
-        position_list_section = f"\n\nPOSITION LIST MAIS RECENTE:\n{position_list_body[:3000]}"
+        position_list_section = f"\n\nPOSITION LIST MAIS RECENTE (use como referencia de status em caso de duvida):\n{position_list_body[:3000]}"
 
-    previous_report_section = ""
-    if previous_report:
-        previous_report_section = f"\n\nRELATORIO DO DIA ANTERIOR (use como contexto para assuntos em andamento):\n{previous_report}"
+    previous_section = ""
+    if previous_briefing:
+        previous_section = f"\n\nBRIEFING DO DIA ANTERIOR (use para identificar o que mudou e o que continua em aberto):\n{previous_briefing}"
 
-    prompt = f"""Voce e um assistente experiente de operacoes maritimas da Lyra Shipping (Rio de Janeiro).
-Gere o relatorio diario de navios com base nos emails das ultimas 48 horas (ate {TODAY_BR}).
+    prompt = f"""Voce e o redator do briefing diario de operacoes maritimas da Lyra Shipping (Rio de Janeiro).
+Hoje e {TODAY_BR}. Os emails abaixo cobrem as ultimas {EMAIL_WINDOW_HOURS} horas.
 
 {position_list_section}
-{previous_report_section}
+{previous_section}
 
-EMAILS DAS ULTIMAS 48H POR NAVIO:
+EMAILS POR NAVIO:
 {emails_text}
 
-INSTRUCOES:
+---
 
-1. ORDENACAO POR IMPORTANCIA:
-   - 🔴 PRIMEIRO: Navios com problemas criticos (retido, reparos obrigatorios, P&I, demurrage correndo, situacoes legais urgentes)
-   - 🟡 SEGUNDO: Navios com pendencias importantes (fundeado aguardando berco, descarregando, pendencias financeiras abertas, documentos pendentes, decisoes necessarias)
-   - 🟢 TERCEIRO: Navios navegando normalmente ou carregando sem problemas — seja BREVE e direto para esses
+PAPEL
+Voce envia uma unica mensagem de email, no proprio corpo, para todos os membros da empresa.
+O objetivo e contextualizar o time e lembrar o que pode exigir atencao hoje.
+Pense em "leitura de 2 minutos para comecar o dia sabendo onde a frota esta e o que esta pegando".
 
-2. NIVEL DE DETALHE:
-   - Navios criticos (🔴): detalhe completo com todos os pontos urgentes
-   - Navios com pendencias (🟡): detalhe relevante, foco nas pendencias
-   - Navios tranquilos (🟢): apenas status, rota, ETA proxima escala — sem blocos vazios
+PUBLICO E TOM
+- Publico: toda a empresa (operacoes, comercial, financeiro, juridico, administrativo, diretoria). Nem todo mundo e tecnico.
+- Tom: objetivo, claro, profissional, levemente informal. Frases curtas. Sem jargao desnecessario.
+- Extensao: o email inteiro deve caber em 1 tela — idealmente 200-400 palavras. Se tiver muita coisa, priorize.
 
-3. FOCO DO RELATORIO:
-   - Priorize o andamento operacional e o progresso de cada viagem (onde esta, o que esta fazendo, o que vem a seguir)
-   - Destaque POSSIVEIS PENDENCIAS que a empresa deve acompanhar, mesmo que nao confirmadas
-   - NAO inclua detalhes de combustivel/bunker, EXCETO se houver previsao concreta de necessidade de abastecimento proxima
-   - Nao inclua horarios exatos desnecessarios — mencione apenas datas/periodos relevantes para decisoes
-   - Se um assunto apareceu no relatorio anterior e continua em andamento, mantenha-o sem repetir todo o contexto
+O QUE INCLUIR
+Para cada navio em viagem ativa, transmita em 1-3 frases:
+- Onde o navio esta (em termos gerais: "navegando para X", "no porto de Y carregando", "fundeado em Z aguardando berco")
+- Como a viagem esta indo (no prazo, atrasando, adiantando, parado)
+- O que o time precisa saber ou fazer, se houver algo que envolva outras areas
 
-4. PESO DAS INFORMACOES:
-   - Emails mais recentes tem PRIORIDADE sobre emails mais antigos — se houver contradição, prevalece o mais recente
-   - Em caso de duvida sobre posicao, status ou proxima escala do navio, use a POSITION LIST como referencia definitiva
-   - Se a position list contradiz os emails, destaque a contradição e mencione ambas as fontes
+O QUE NAO INCLUIR
+- Quantidade de combustivel / ROB
+- Horarios em formato UTC ou notacao tecnica — use linguagem natural ("hoje a tarde", "amanha", "fim de semana", "proxima semana")
+- Coordenadas, velocidade em nos, milhas restantes
+- Numeros de NOR, clausulas de CP, IMOs
+- Dados de tripulacao
+- Listas exaustivas de emails analisados
 
-5. FORMATO POR NAVIO (siga rigorosamente este modelo):
+REGRAS DE REDACAO
+- Uma ideia por bullet. Se precisar explicar mais, e detalhe demais para este formato.
+- Nome do navio em negrito (**NOME**) para facilitar escaneamento visual.
+- Datas em linguagem natural. Se precisar de data exata, use DD/MM sem ano.
+- Destaque o que o time precisa FAZER, nao o que o sistema ja registrou.
+  Ex.: em vez de "ETA atualizada para 22/04", escreva "chegada em Santos deve atrasar para o fim de semana — pode impactar agenda comercial da semana que vem."
+- Nao use adjetivos subjetivos sem base ("tudo correndo bem"). Prefira fatos: "sem intercorrencias nas ultimas 24h".
+- Severidade sinalizada por emoji (🟢 normal, 🟡 atencao, 🔴 urgente).
+- Emails mais recentes tem PRIORIDADE sobre emails mais antigos — se houver contradicao, prevalece o mais recente.
+- Em caso de duvida sobre posicao ou status, use a POSITION LIST como referencia definitiva.
+- Jamais invente. Se a informacao nao esta nos emails, nao inclua, ou escreva "sem atualizacao recente sobre [navio]".
+- Se um assunto do briefing anterior continua em aberto, mantenha-o sem repetir todo o contexto.
 
-[EMOJI]  M/V [NOME] · Voy. [NUMERO]
-  Status    [descricao detalhada — porto, berco, operacao em curso]
-  Rota      [origem → destino] | [carga e quantidade] | [viagem]
+ESTRUTURA DO EMAIL (siga este template):
+Assunto: Briefing da Frota — {TODAY_BR} | [resumo em 5 palavras do destaque do dia]
 
-  URGENTE (somente se houver — use ⚠️ para cada item critico)
-  ⚠️ [item urgente com contexto suficiente para acao imediata]
+Bom dia a todos,
 
-  OPERACIONAL
-  - [progresso da operacao com dados concretos: quantidades, percentuais, datas]
-  - [use ✔ para itens confirmados/concluidos]
+[1 frase abrindo o panorama geral]
 
-  POSSIVEIS PENDENCIAS (somente se houver suspeita)
-  - [item que merece atencao mesmo sem confirmacao]
+🚢 Em destaque hoje
+- [**Navio**] — [o que esta acontecendo em 1 linha, e o que isso pede do time, se algo].
 
-  PROXIMA VIAGEM (somente se relevante)
-  - [carga, rota, laydays, agente]
+🟢 Andamento normal
+- [**Navio X**], [**Navio Y**] — [status geral em 1 linha cada, bem enxuto].
 
-  PROXIMOS PASSOS
-  - [acoes concretas e objetivas, com responsavel quando conhecido]
+⚠️ Atencao / pendencias
+- [Item que pode virar problema, com area sugerida entre parenteses].
 
-EXEMPLO DE BLOCO BEM FORMATADO:
-🟡  M/V LEFTERIS T · Voy. 019/25
-  Status    Em descarga — Salvador/BA | Proxima escala: Areia Branca/RN
-  Rota      Salvador → Areia Branca/RN | Trigo (descarga) / Sal (carga)
+📅 Proximos marcos
+- [Chegadas, saidas, operacoes relevantes previstas para os proximos 2-3 dias, em linguagem natural].
 
-  URGENTE
-  ⚠️ Ballast Water Report (Normam 20) pendente — deve ser enviado ao agente HMS/RN antes de 20/04.
+Qualquer duvida, respondam a este email ou falem com Operacoes.
 
-  OPERACIONAL
-  - Descarregado ate 18/04 07:00: 27.187 MT | Saldo: 4.796 MT (de 31.983 MT) | ETC Salvador: 19/04 PM
-  - ETA Areia Branca: 22/04 AM | Zarpe previsto: 19/04
-  - Documentacao pre-chegada: ✔ completa, exceto Ballast Water (pendente)
+— Briefing gerado automaticamente a partir dos emails operacionais.
 
-  PROXIMOS PASSOS
-  - ⚠️ Cobrar Ballast Water Report do Cap. e encaminhar ao HMS/RN antes de 20/04
-  - Confirmar zarpe de Salvador e comunicar ao agente
+CASOS ESPECIAIS
+- Dia sem novidades: o email ainda sai, bem curto, confirmando que a frota segue sem intercorrencias e listando apenas proximos marcos.
+- Informacao ambigua: registrar como "a confirmar" — nao expor confusao para a empresa.
+- Fim de semana / feriado: tom ainda mais enxuto.
+- Omita secoes que nao tiverem conteudo (nao escreva "nada a reportar").
 
-6. VIAGENS ANTERIORES: Se houver emails sobre viagens ja encerradas (demonstrativos de frete, saldos pendentes), liste ao final:
+EXEMPLO DE BRIEFING (referencia de tom e tamanho):
+Assunto: Briefing da Frota — 18/04 | Heraklitos com contradicao de posicao
 
-  PENDENCIAS DE VIAGENS ANTERIORES
-  - M/V [NOME] voy [X]: [descricao]
+Bom dia a todos,
 
-7. Se um navio nao tiver emails nas ultimas 48h, inclua brevemente com status do relatorio anterior se disponivel.
+Dia com atencao para o Heraklitos, cuja posicao apresenta contradicao entre fontes — equipe de operacoes ja esta apurando.
 
-Cabecalho do relatorio:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {TODAY_BR}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚢 Em destaque hoje
+- 🔴 **Heraklitos** — Pre Notice indica zarpe no dia 17, mas Noon Report de hoje ainda posiciona o navio no berco em Brake. Contradicao sendo investigada com Narval e agente J.Muller. Alem disso, saldo de 20% do frete so deve entrar na quarta por conta do feriado — Financeiro acompanhar.
+- 🟡 **Lefteris T** — em descarga em Salvador, com zarpe previsto amanha. Atencao para documento de agua de lastro ainda pendente com agente em Areia Branca — prazo apertado.
 
-Separador entre navios: ──────────────────────────────────────"""
+🟢 Andamento normal
+- **Marcos Dias** — fundeado em San Lorenzo aguardando berco para carregar trigo. Dentro do previsto.
+- **Ekaterina** — fundeado em Imbituba aguardando vez no berco. ETB confirmado para o fim de semana.
+- **Dahlia** — chegando a Vitoria hoje a tarde para inicio da descarga de malte.
+- **Paragon** — chegando a Nueva Palmira amanha para carregamento de cevada.
+- **Callio** — navegando pelo Mediterraneo, chega a Ortona na proxima terca.
+
+⚠️ Atencao / pendencias
+- Demonstrativo final de frete do Paragon (viagem anterior) ainda nao enviado para contraparte — Operacoes verificar com urgencia.
+
+📅 Proximos marcos
+- **Lefteris T** zarpa de Salvador amanha e chega em Areia Branca na proxima segunda.
+- **Paragon** inicia carregamento em Nueva Palmira amanha.
+- **Callio** chega em Ortona na proxima terca — documentacao ao agente deve sair hoje.
+
+Qualquer duvida, respondam a este email ou falem com Operacoes.
+
+— Briefing gerado automaticamente a partir dos emails operacionais.
+
+Agora gere o briefing de hoje ({TODAY_BR}) seguindo exatamente este modelo. Comece com a linha do Assunto."""
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     message = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=8096,
+        max_tokens=4096,
         messages=[{"role": "user", "content": prompt}]
     )
     return message.content[0].text
@@ -257,8 +281,13 @@ if __name__ == "__main__":
     mail = fetch_emails_imap()
     vessels, position_list_body = get_vessels_from_position_list(mail)
     emails_by_vessel = fetch_all_emails(mail, vessels)
-    previous_report = fetch_previous_report(mail)
+    previous_briefing = fetch_previous_briefing(mail)
     mail.logout()
-    report = generate_report(emails_by_vessel, position_list_body, previous_report)
-    subject = f"LYRA SHIPPING . RELATORIO DIARIO . {TODAY_BR}"
-    send_email(subject, report)
+    briefing = generate_briefing(emails_by_vessel, position_list_body, previous_briefing)
+
+    # Extrai assunto da primeira linha gerada pelo Claude
+    lines = briefing.strip().splitlines()
+    subject = lines[0].replace("Assunto:", "").strip() if lines[0].startswith("Assunto:") else f"Briefing da Frota — {TODAY_BR}"
+    body = "\n".join(lines[1:]).strip() if lines[0].startswith("Assunto:") else briefing
+
+    send_email(subject, body)
