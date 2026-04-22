@@ -367,8 +367,15 @@ Apos o bloco de todos os navios, adicione (somente se houver itens):
 PENDENCIAS DE VIAGENS ANTERIORES
 ──────────────────────────────────────────────
 [Navio] — VOY [XXX/XX] — [Contraparte]
-  - [descricao do item: laytime, disputa, fatura, demurrage, etc.]
+  - [descricao do item: laytime, disputa, fatura, demurrage, despesas do armador, etc.]
   - Status: [situacao atual confirmada no email]
+
+Ordenar por importancia:
+1. Disputas juridicas ativas (advogados envolvidos, acordos formais pendentes)
+2. Laytimes em aberto sem resposta dos afretadores
+3. Notas de debito ou faturas aguardando resposta interna
+4. Fechamentos de viagem com despesas pendentes
+5. Outros itens administrativos
 
 (omitir a secao inteira se nao houver pendencias de viagens anteriores)
 
