@@ -289,6 +289,11 @@ REGRAS FUNDAMENTAIS:
    - NAO extraia informacoes operacionais da planilha (rota, ETA, status, bunkers).
    - Toda informacao operacional vem exclusivamente dos emails.
 
+5. AGENTE vs FRETADOR: Nunca confundir agente maritimo com fretador/charterer.
+   - Agente = empresa local que representa o navio no porto (ex: HMS Brasil, Fratino & Figli).
+   - Fretador/Charterer = empresa que contratou o navio (confirmar sempre no fixture recap).
+   - Se nao tiver certeza do charterer, omitir — nao deduzir pelo nome do agente.
+
 OUTRAS REGRAS:
 - NAO use markdown (sem ##, sem **, sem _).
 - Use APENAS texto simples com os separadores abaixo.
@@ -297,9 +302,9 @@ OUTRAS REGRAS:
 - Nao liste escalas futuras — apenas a proxima viagem imediata.
 - Nao repita informacoes do ultimo relatorio se nao houver atualizacao confirmada.
 - Sem duplicidades entre secoes: cada informacao aparece UMA unica vez, na secao mais adequada.
-  PROXIMOS PASSOS lista apenas acoes ainda nao mencionadas acima — nunca repita o que ja esta em URGENTE ou OPERACIONAL.
-- Questoes de viagens ANTERIORES (laytime, disputas, faturas, demurrage de voyages ja encerradas) NAO entram no bloco do navio.
-  Coloque-as numa secao separada no final do relatorio, apos todos os navios.
+- Questoes de viagens ANTERIORES (laytime, disputas, faturas, demurrage de voyages encerradas) NUNCA entram no bloco do navio.
+  Estas questoes vao EXCLUSIVAMENTE na secao de pendencias no final. Sem excecoes.
+- Quando uma informacao nao estiver disponivel (contato, ETA, etc.), omitir silenciosamente — sem explicar entre parenteses o motivo da ausencia.
 
 A frota tem EXATAMENTE estes 7 navios — inclua TODOS, sem excecao:
 {fleet_list}
@@ -330,7 +335,8 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {today}
 
   OPERACIONAL
   - [apenas o confirmado nos emails: posicao, ROB, status da operacao, PDA]
-  - Agente: [nome]  |  Contato: [email ou telefone, se disponivel nos emails]
+  - Agente: [nome]  |  Contato: [email ou telefone, se disponivel]
+  - Fretador: [nome, confirmado no fixture recap]
   - maximo 4 bullets
   - se nao houver informacao nova confirmada, escreva "sem atualizacao confirmada"
 
@@ -340,8 +346,9 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {today}
   - [Porto de carga] -> [Porto de descarga]
   (omitir se nao houver informacao confirmada)
 
-  PROXIMOS PASSOS
-  - [acao necessaria confirmada pelos emails]
+  PENDENCIAS
+  - [apenas acoes pontuais pendentes que ainda nao foram realizadas, confirmadas nos emails]
+  (omitir se nao houver nada pendente)
 
 ──────────────────────────────────────────────
 
@@ -364,14 +371,6 @@ PENDENCIAS DE VIAGENS ANTERIORES
   - Status: [situacao atual confirmada no email]
 
 (omitir a secao inteira se nao houver pendencias de viagens anteriores)
-
-Apos o relatorio em Portugues, adicione exatamente este separador e repita o relatorio completo em Ingles:
-
-════════════════════════════════════════════════════════
-ENGLISH VERSION  ·  DAILY VESSEL REPORT  ·  {today}
-════════════════════════════════════════════════════════
-
-[Same format and same rules in English. Only confirmed data.]
 
 ---
 Emails das ultimas 24 horas:
