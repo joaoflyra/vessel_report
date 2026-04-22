@@ -131,6 +131,49 @@ def fetch_last_report(mail_conn):
         return None, None
 
 
+def fetch_fixture_recaps(mail_conn):
+    """Busca fixture recaps dos ultimos 30 dias para referencia de agentes e charterers."""
+    since = (datetime.now() - timedelta(days=30)).strftime("%d-%b-%Y")
+    recaps = []
+
+    for keyword in ["recap", "fixture", "charter party"]:
+        try:
+            _, ids = mail_conn.search(None, f'(SUBJECT "{keyword}" SINCE {since})')
+            if not ids[0]:
+                continue
+            for msg_id in ids[0].split()[-20:]:
+                _, msg_data = mail_conn.fetch(msg_id, "(RFC822)")
+                msg = email.message_from_bytes(msg_data[0][1])
+                subject = decode_header_value(msg.get("Subject", ""))
+                sender = decode_header_value(msg.get("From", ""))
+                date_str = msg.get("Date", "")
+                body = ""
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        if part.get_content_type() == "text/plain":
+                            payload = part.get_payload(decode=True)
+                            if payload:
+                                body = payload.decode("utf-8", errors="ignore")
+                                break
+                else:
+                    payload = msg.get_payload(decode=True)
+                    if payload:
+                        body = payload.decode("utf-8", errors="ignore")
+                recaps.append({"subject": subject, "from": sender, "date": date_str, "body": body[:2000]})
+        except Exception:
+            continue
+
+    # deduplicar por assunto+remetente
+    seen = set()
+    unique = []
+    for r in recaps:
+        key = (r["subject"], r["from"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(r)
+    return unique
+
+
 def fetch_vessel_emails():
     mail = imaplib.IMAP4_SSL("imap.gmail.com")
     mail.login(GMAIL_USER, GMAIL_APP_PASSWORD)
@@ -138,6 +181,7 @@ def fetch_vessel_emails():
 
     positions_text, positions_meta = fetch_cristiano_positions(mail)
     last_report, last_report_date = fetch_last_report(mail)
+    fixture_recaps = fetch_fixture_recaps(mail)
 
     since_date = (datetime.now() - timedelta(days=1)).strftime("%d-%b-%Y")
     _, message_ids = mail.search(None, f"(SINCE {since_date})")
@@ -170,10 +214,10 @@ def fetch_vessel_emails():
 
     mail.close()
     mail.logout()
-    return emails, positions_text, positions_meta, last_report, last_report_date
+    return emails, positions_text, positions_meta, last_report, last_report_date, fixture_recaps
 
 
-def generate_report(emails, positions_text, positions_meta, last_report, last_report_date):
+def generate_report(emails, positions_text, positions_meta, last_report, last_report_date, fixture_recaps):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     today = datetime.now().strftime("%d/%m/%Y")
@@ -208,6 +252,21 @@ Data: {last_report_date}
 """
     else:
         last_report_section = "\nUltimo relatorio: nao encontrado.\n"
+
+    if fixture_recaps:
+        recap_content = "\n\n---\n\n".join([
+            f"De: {r['from']}\nData: {r['date']}\nAssunto: {r['subject']}\n\n{r['body']}"
+            for r in fixture_recaps
+        ])
+        recaps_section = f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FIXTURE RECAPS / CHARTER PARTIES (ultimos 30 dias — referencia para agentes e charterers)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Use estes documentos para confirmar agentes e charterers em caso de duvida.
+{recap_content[:6000]}
+"""
+    else:
+        recaps_section = "\nFixture recaps: nenhum encontrado nos ultimos 30 dias.\n"
 
     prompt = f"""Voce e um assistente especializado em operacoes maritimas da empresa Lyra Shipping.
 
@@ -248,6 +307,8 @@ A frota tem EXATAMENTE estes 7 navios — inclua TODOS, sem excecao:
 {positions_section}
 
 {last_report_section}
+
+{recaps_section}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FORMATO DO RELATORIO — use EXATAMENTE:
@@ -353,7 +414,7 @@ if __name__ == "__main__":
         print("[ERRO] ANTHROPIC_API_KEY nao configurado.")
         exit(1)
 
-    emails, positions_text, positions_meta, last_report, last_report_date = fetch_vessel_emails()
+    emails, positions_text, positions_meta, last_report, last_report_date, fixture_recaps = fetch_vessel_emails()
     print(f"[INFO] {len(emails)} email(s) encontrado(s) nas ultimas 24h.")
     if positions_text:
         print(f"[INFO] Planilha de posicoes encontrada: {positions_meta}")
@@ -363,8 +424,9 @@ if __name__ == "__main__":
         print(f"[INFO] Ultimo relatorio encontrado: {last_report_date}")
     else:
         print("[AVISO] Ultimo relatorio nao encontrado.")
+    print(f"[INFO] Fixture recaps encontrados: {len(fixture_recaps)}")
 
-    report = generate_report(emails, positions_text, positions_meta, last_report, last_report_date)
+    report = generate_report(emails, positions_text, positions_meta, last_report, last_report_date, fixture_recaps)
     print("\n--- RELATORIO GERADO ---")
     print(report.encode("cp1252", errors="replace").decode("cp1252"))
     print("------------------------\n")
