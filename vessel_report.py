@@ -239,6 +239,8 @@ OUTRAS REGRAS:
 - Nao repita informacoes do ultimo relatorio se nao houver atualizacao confirmada.
 - Sem duplicidades entre secoes: cada informacao aparece UMA unica vez, na secao mais adequada.
   PROXIMOS PASSOS lista apenas acoes ainda nao mencionadas acima — nunca repita o que ja esta em URGENTE ou OPERACIONAL.
+- Questoes de viagens ANTERIORES (laytime, disputas, faturas, demurrage de voyages ja encerradas) NAO entram no bloco do navio.
+  Coloque-as numa secao separada no final do relatorio, apos todos os navios.
 
 A frota tem EXATAMENTE estes 7 navios — inclua TODOS, sem excecao:
 {fleet_list}
@@ -289,6 +291,17 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {today}
 
 ORDENACAO: 🔴 primeiro, 🟢 por ultimo.
 Se nao houver URGENTE, omita essa secao inteira.
+
+Apos o bloco de todos os navios, adicione (somente se houver itens):
+
+──────────────────────────────────────────────
+PENDENCIAS DE VIAGENS ANTERIORES
+──────────────────────────────────────────────
+[Navio] — VOY [XXX/XX] — [Contraparte]
+  - [descricao do item: laytime, disputa, fatura, demurrage, etc.]
+  - Status: [situacao atual confirmada no email]
+
+(omitir a secao inteira se nao houver pendencias de viagens anteriores)
 
 Apos o relatorio em Portugues, adicione exatamente este separador e repita o relatorio completo em Ingles:
 
