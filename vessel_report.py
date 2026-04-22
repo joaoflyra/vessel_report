@@ -329,7 +329,8 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {today}
   - [item critico curto e claro]
 
   OPERACIONAL
-  - [apenas o confirmado nos emails: posicao, ROB, status da operacao, agente, PDA]
+  - [apenas o confirmado nos emails: posicao, ROB, status da operacao, PDA]
+  - Agente: [nome]  |  Contato: [email ou telefone, se disponivel nos emails]
   - maximo 4 bullets
   - se nao houver informacao nova confirmada, escreva "sem atualizacao confirmada"
 
