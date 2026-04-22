@@ -325,10 +325,10 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {today}
 
 [Para cada navio:]
 
-[NIVEL]  M/V [NOME]
+[NIVEL]  M/V [NOME]  —  VOY [XXX/XX]
   Status    [navegando / em porto / fundeado / retido / inativo / sem informacao]
   Rota      [Porto de origem] -> [Porto de destino]  |  ETA [data hora ou "nao informado"]
-  Viagem    [VOY]  |  [Carga e quantidade]
+  Carga     [tipo e quantidade]
 
   URGENTE                          <- so se houver algo critico confirmado
   - [item critico curto e claro]
