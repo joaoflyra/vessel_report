@@ -405,8 +405,47 @@ def send_report(report_text):
     print(f"[OK] Relatorio enviado para {', '.join(recipients)}")
 
 
+def check_position_list_today(mail_conn):
+    """Verifica se chegou position list do Cristiano hoje."""
+    today = datetime.now().strftime("%d-%b-%Y")
+    _, ids = mail_conn.search(None, f'(FROM "{CRISTIANO_EMAIL}" SINCE {today})')
+    if not ids[0]:
+        return False
+    for msg_id in ids[0].split():
+        _, msg_data = mail_conn.fetch(msg_id, "(RFC822)")
+        msg = email.message_from_bytes(msg_data[0][1])
+        for part in msg.walk():
+            fn = part.get_filename()
+            if fn:
+                ext = decode_header_value(fn).lower().split(".")[-1]
+                if ext in ("xlsx", "xls"):
+                    return True
+    return False
+
+
+def check_report_already_sent_today(mail_conn):
+    """Verifica se o relatorio diario ja foi enviado hoje."""
+    today = datetime.now().strftime("%d-%b-%Y")
+    sent_folders = ['"[Gmail]/Sent Mail"', '"[Gmail]/Enviados"', "Sent", "Enviados"]
+    for folder in sent_folders:
+        try:
+            status, _ = mail_conn.select(folder)
+            if status != "OK":
+                continue
+            _, ids = mail_conn.search(None, f'(SUBJECT "Relatorio Diario" SINCE {today})')
+            mail_conn.select("inbox")
+            if ids[0]:
+                return True
+        except Exception:
+            try:
+                mail_conn.select("inbox")
+            except Exception:
+                pass
+    return False
+
+
 if __name__ == "__main__":
-    print(f"[{datetime.now().strftime('%d/%m/%Y %H:%M')}] Iniciando geracao do relatorio diario...")
+    print(f"[{datetime.now().strftime('%d/%m/%Y %H:%M')}] Verificando position list...")
 
     if not GMAIL_APP_PASSWORD:
         print("[ERRO] GMAIL_APP_PASSWORD nao configurado.")
@@ -415,6 +454,26 @@ if __name__ == "__main__":
         print("[ERRO] ANTHROPIC_API_KEY nao configurado.")
         exit(1)
 
+    mail = imaplib.IMAP4_SSL("imap.gmail.com")
+    mail.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+    mail.select("inbox")
+
+    if not check_position_list_today(mail):
+        print("[INFO] Position list do Cristiano ainda nao chegou hoje. Aguardando.")
+        mail.close()
+        mail.logout()
+        exit(0)
+
+    if check_report_already_sent_today(mail):
+        print("[INFO] Relatorio ja enviado hoje. Nada a fazer.")
+        mail.close()
+        mail.logout()
+        exit(0)
+
+    mail.close()
+    mail.logout()
+
+    print("[INFO] Position list recebida. Gerando relatorio...")
     emails, positions_text, positions_meta, last_report, last_report_date, fixture_recaps = fetch_vessel_emails()
     print(f"[INFO] {len(emails)} email(s) encontrado(s) nas ultimas 24h.")
     if positions_text:
