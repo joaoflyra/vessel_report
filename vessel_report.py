@@ -237,6 +237,8 @@ OUTRAS REGRAS:
 - Evite siglas tecnicas sem explicacao.
 - Nao liste escalas futuras — apenas a proxima viagem imediata.
 - Nao repita informacoes do ultimo relatorio se nao houver atualizacao confirmada.
+- Sem duplicidades entre secoes: cada informacao aparece UMA unica vez, na secao mais adequada.
+  PROXIMOS PASSOS lista apenas acoes ainda nao mencionadas acima — nunca repita o que ja esta em URGENTE ou OPERACIONAL.
 
 A frota tem EXATAMENTE estes 7 navios — inclua TODOS, sem excecao:
 {fleet_list}
