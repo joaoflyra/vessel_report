@@ -187,13 +187,16 @@ def generate_report(emails, positions_text, positions_meta, last_report, last_re
     if positions_text:
         positions_section = f"""
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PLANILHA DE POSICOES (Cristiano — dia util anterior)
+PLANILHA DE POSICOES (referencia de nomes apenas)
 {positions_meta}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+USE esta planilha APENAS para identificar quais navios da frota estao ativos.
+NAO extraia informacoes operacionais desta planilha (rota, ETA, status, bunkers, etc.).
+Toda informacao operacional deve vir exclusivamente dos emails.
 {positions_text[:4000]}
 """
     else:
-        positions_section = "\nPlanilha de posicoes do Cristiano: nao encontrada para o dia util anterior.\n"
+        positions_section = "\nPlanilha de posicoes do Cristiano: nao encontrada.\n"
 
     if last_report:
         last_report_section = f"""
@@ -208,17 +211,29 @@ Data: {last_report_date}
 
     prompt = f"""Voce e um assistente especializado em operacoes maritimas da empresa Lyra Shipping.
 
-REGRA FUNDAMENTAL — SEM DEDUCOES:
-- Inclua APENAS informacoes confirmadas explicitamente nos emails ou na planilha de posicoes.
-- Se uma informacao nao estiver clara nos dados fornecidos, escreva "sem informacao" — jamais deduza, infira ou suponha.
-- Nao complete lacunas com estimativas proprias. Se o ETA nao estiver no email, escreva "ETA nao informado".
-- Em caso de duvida sobre qualquer dado, omita-o ou indique "dado nao confirmado".
+REGRAS FUNDAMENTAIS:
+
+1. SEM DEDUCOES: Inclua APENAS informacoes confirmadas explicitamente nos emails.
+   - Jamais deduza, infira ou suponha qualquer informacao.
+   - Se o ETA nao estiver no email, escreva "ETA nao informado".
+   - Em caso de duvida, omita ou indique "dado nao confirmado".
+
+2. NOMES DE PORTOS: Copie o nome do porto EXATAMENTE como aparece no email.
+   - Nunca abrevie, trunce ou interprete nomes de portos.
+   - Se o porto nao estiver claro no email, escreva "porto nao especificado".
+
+3. BUNKERS: Mencione bunkers SOMENTE se houver email concreto sobre o assunto
+   (cotacao, pedido ou confirmacao de fornecimento).
+   - Nunca mencione bunkers com base em anotacoes da planilha de posicoes.
+
+4. PLANILHA DE POSICOES: Use-a APENAS para identificar quais navios estao ativos.
+   - NAO extraia informacoes operacionais da planilha (rota, ETA, status, bunkers).
+   - Toda informacao operacional vem exclusivamente dos emails.
 
 OUTRAS REGRAS:
 - NAO use markdown (sem ##, sem **, sem _).
 - Use APENAS texto simples com os separadores abaixo.
 - Seja conciso. Sem frases longas. Prefira bullet points curtos.
-- Escreva os nomes dos portos por extenso, sem siglas.
 - Evite siglas tecnicas sem explicacao.
 - Nao liste escalas futuras — apenas a proxima viagem imediata.
 - Nao repita informacoes do ultimo relatorio se nao houver atualizacao confirmada.
