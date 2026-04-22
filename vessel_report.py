@@ -86,55 +86,49 @@ def fetch_last_report(mail_conn):
     since = (datetime.now() - timedelta(days=7)).strftime("%d-%b-%Y")
 
     sent_folders = ['"[Gmail]/Sent Mail"', '"[Gmail]/Enviados"', "Sent", "Enviados"]
-    selected = False
+    sent_folder = None
     for folder in sent_folders:
         try:
             status, _ = mail_conn.select(folder)
             if status == "OK":
-                selected = True
+                sent_folder = folder
                 break
         except Exception:
             continue
 
-    if not selected:
+    if not sent_folder:
+        mail_conn.select("inbox")
         return None, None
 
-    _, ids = mail_conn.search(None, f'(SUBJECT "Relatorio Diario" SINCE {since})')
-    mail_conn.select("inbox")
+    try:
+        _, ids = mail_conn.search(None, f'(SUBJECT "Relatorio Diario" SINCE {since})')
+        if not ids[0]:
+            mail_conn.select("inbox")
+            return None, None
 
-    if not ids[0]:
+        msg_id = ids[0].split()[-1]
+        _, msg_data = mail_conn.fetch(msg_id, "(RFC822)")
+        msg = email.message_from_bytes(msg_data[0][1])
+        date_str = msg.get("Date", "")
+
+        body = ""
+        if msg.is_multipart():
+            for part in msg.walk():
+                if part.get_content_type() == "text/plain":
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        body = payload.decode("utf-8", errors="ignore")
+                        break
+        else:
+            payload = msg.get_payload(decode=True)
+            if payload:
+                body = payload.decode("utf-8", errors="ignore")
+
+        mail_conn.select("inbox")
+        return body[:5000], date_str
+    except Exception:
+        mail_conn.select("inbox")
         return None, None
-
-    msg_id = ids[0].split()[-1]
-
-    # re-seleciona a pasta enviados para buscar o email
-    for folder in sent_folders:
-        try:
-            status, _ = mail_conn.select(folder)
-            if status == "OK":
-                break
-        except Exception:
-            continue
-
-    _, msg_data = mail_conn.fetch(msg_id, "(RFC822)")
-    msg = email.message_from_bytes(msg_data[0][1])
-    date_str = msg.get("Date", "")
-
-    body = ""
-    if msg.is_multipart():
-        for part in msg.walk():
-            if part.get_content_type() == "text/plain":
-                payload = part.get_payload(decode=True)
-                if payload:
-                    body = payload.decode("utf-8", errors="ignore")
-                    break
-    else:
-        payload = msg.get_payload(decode=True)
-        if payload:
-            body = payload.decode("utf-8", errors="ignore")
-
-    mail_conn.select("inbox")
-    return body[:5000], date_str
 
 
 def fetch_vessel_emails():
@@ -296,7 +290,6 @@ Emails das ultimas 24 horas:
         max_tokens=10000,
         messages=[{"role": "user", "content": prompt}],
     )
-
     return response.content[0].text
 
 

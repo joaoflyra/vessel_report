@@ -103,8 +103,46 @@ def fetch_broker_emails():
 
 
 def analyze_market(emails):
+    # processa em lotes de 100 emails e junta os resultados
+    batch_size = 100
+    batches = [emails[i:i+batch_size] for i in range(0, len(emails), batch_size)]
+    print(f"[INFO] Processando {len(batches)} lote(s) de ate {batch_size} emails...")
+
+    merged = {
+        "summary": {"total_emails": len(emails), "broker_emails": 0, "ignored_emails": 0,
+                    "tonnage_count": 0, "orders_count": 0, "cargo_offers_count": 0},
+        "brokers_seen": [],
+        "tonnage": [], "orders": [], "cargo_offers": [], "highlights": [],
+        "_email_content": ""
+    }
+
+    all_email_content = []
+    for i, batch in enumerate(batches):
+        print(f"[INFO] Lote {i+1}/{len(batches)} ({len(batch)} emails)...")
+        result = _analyze_batch(batch)
+        merged["tonnage"].extend(result.get("tonnage", []))
+        merged["orders"].extend(result.get("orders", []))
+        merged["cargo_offers"].extend(result.get("cargo_offers", []))
+        merged["brokers_seen"].extend(result.get("brokers_seen", []))
+        s = result.get("summary", {})
+        merged["summary"]["broker_emails"] += s.get("broker_emails", 0)
+        merged["summary"]["ignored_emails"] += s.get("ignored_emails", 0)
+        all_email_content.append("\n\n---\n\n".join([
+            f"De: {e['from']}\nAssunto: {e['subject']}\n\n{e['body']}" for e in batch
+        ]))
+
+    merged["brokers_seen"] = sorted(set(merged["brokers_seen"]))
+    merged["summary"]["tonnage_count"] = len(merged["tonnage"])
+    merged["summary"]["orders_count"] = len(merged["orders"])
+    merged["summary"]["cargo_offers_count"] = len(merged["cargo_offers"])
+
+    email_content = "\n\n---\n\n".join(all_email_content)
+    merged["highlights"] = generate_highlights(merged, email_content)
+    return merged
+
+
+def _analyze_batch(emails):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    today = datetime.now().strftime("%d/%m/%Y")
 
     email_content = "\n\n---\n\n".join([
         f"De: {e['from']}\nAssunto: {e['subject']}\n\n{e['body']}"
@@ -210,9 +248,6 @@ Emails ({len(emails)} total):
         if text.startswith("json"):
             text = text[4:]
     data = json.loads(text)
-
-    # gera destaques com Sonnet (melhor analise)
-    data["highlights"] = generate_highlights(data, email_content)
     return data
 
 
@@ -222,15 +257,15 @@ def generate_highlights(data, email_content):
 
     tonnage_summary = "\n".join([
         f"- {v['vessel']} / {v['dwt']} DWT / {v['size_class']} — Aberto {v['open_port']} {v['open_date']} ({v['region']})"
-        for v in data.get("tonnage", [])
+        for v in data.get("tonnage", [])[:60]
     ])
     orders_summary = "\n".join([
         f"- {o['quantity']} {o['cargo']} {o['load_port']}->{o['discharge_port']} laycan {o['laycan']} ({o['size_class']})"
-        for o in data.get("orders", [])
+        for o in data.get("orders", [])[:60]
     ])
     cargo_summary = "\n".join([
         f"- {c['quantity']} {c['cargo']} {c['load_port']}->{c['discharge_port']} laycan {c['laycan']}"
-        for c in data.get("cargo_offers", [])
+        for c in data.get("cargo_offers", [])[:60]
     ])
 
     prompt = f"""Você é um analista sênior de mercado de fretes maritimos dry bulk.
@@ -258,16 +293,29 @@ Retorne APENAS uma lista JSON de strings, sem texto adicional:
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1000,
+        max_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
     )
 
     text = response.content[0].text.strip()
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    return json.loads(text)
+    if "```" in text:
+        parts = text.split("```")
+        for p in parts:
+            p = p.strip()
+            if p.startswith("json"):
+                p = p[4:].strip()
+            if p.startswith("["):
+                text = p
+                break
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # extract array even if response has trailing text
+        start = text.find("[")
+        end = text.rfind("]")
+        if start != -1 and end != -1:
+            return json.loads(text[start:end+1])
+        return ["Sem destaques disponíveis."]
 
 
 def build_pdf(data):
@@ -401,7 +449,11 @@ def build_pdf(data):
                 for v in vessels:
                     yr = f" / {v['year']}" if v.get("year") else ""
                     note = f"  —  {v['notes']}" if v.get("notes") else ""
-                    line = f"<b>{v['vessel']}</b>  /  {v['dwt']:,} DWT{yr}  —  Aberto {v['open_port']} {v['open_date']}{note}  —  <i>Broker: {v['broker']}</i>"
+                    try:
+                        dwt_str = f"{int(v['dwt']):,}"
+                    except (ValueError, TypeError):
+                        dwt_str = str(v.get("dwt", "n/d"))
+                    line = f"<b>{v['vessel']}</b>  /  {dwt_str} DWT{yr}  —  Aberto {v['open_port']} {v['open_date']}{note}  —  <i>Broker: {v['broker']}</i>"
                     story.append(Paragraph(line, ParagraphStyle("vl", fontSize=8, fontName="Helvetica", leftIndent=24, spaceAfter=2, leading=11)))
         story.append(Spacer(1, 0.4*cm))
 
