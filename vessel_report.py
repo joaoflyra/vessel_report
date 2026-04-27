@@ -212,10 +212,8 @@ def fetch_vessel_emails():
         body = body[:3000]
         emails.append({"subject": subject, "from": sender, "date": date_str, "body": body})
 
-    mail.close()
     mail.logout()
     return emails, positions_text, positions_meta, last_report, last_report_date, fixture_recaps
-
 
 def generate_report(emails, positions_text, positions_meta, last_report, last_report_date, fixture_recaps):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -466,17 +464,13 @@ if __name__ == "__main__":
 
     if not check_position_list_today(mail):
         print("[INFO] Position list do Cristiano ainda nao chegou hoje. Aguardando.")
-        mail.close()
         mail.logout()
         exit(0)
 
-    if check_report_already_sent_today(mail):
         print("[INFO] Relatorio ja enviado hoje. Nada a fazer.")
-        mail.close()
         mail.logout()
         exit(0)
 
-    mail.close()
     mail.logout()
 
     print("[INFO] Position list recebida. Gerando relatorio...")
