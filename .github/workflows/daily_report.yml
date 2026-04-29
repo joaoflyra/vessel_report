@@ -5,6 +5,10 @@ on:
     - cron: '*/30 * * * *'  # a cada 30min — dispara apos receber a position list do Cristiano
   workflow_dispatch:          # permite rodar manualmente
 
+concurrency:
+  group: daily-vessel-report
+  cancel-in-progress: false
+
 jobs:
   send-report:
     runs-on: ubuntu-latest
