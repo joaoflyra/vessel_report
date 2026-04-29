@@ -16,6 +16,8 @@ GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 REPORT_RECIPIENT = os.environ.get("REPORT_RECIPIENT", GMAIL_USER)
 CRISTIANO_EMAIL = "cristiano@lyrashipping.com.br"
+JEROME_EMAIL = "jerome@lyrashipping.com.br"
+POSITION_LIST_SENDERS = [CRISTIANO_EMAIL, JEROME_EMAIL]
 
 FLEET = ["EKATERINA", "CALLIO", "DAHLIA", "PARAGON", "HERAKLITOS", "MARCOS DIAS", "LEFTERIS T"]
 
@@ -54,19 +56,90 @@ def excel_to_text(data: bytes) -> str:
     return "\n".join(lines)
 
 
+def extract_next_ports_from_excel(data: bytes) -> dict:
+    """Extrai próximo porto por navio da última coluna da position list."""
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
+        SKIP_WORDS = {"vessel", "navio", "ship", "mv", "m/v", "nome", "name", "date",
+                      "porto", "port", "status", "eta", "etd", "none", "n/a", ""}
+        result = {}
+        for sheet in wb.sheetnames:
+            ws = wb[sheet]
+            vessel_col = None
+            for row in ws.iter_rows(min_row=1, max_row=5, values_only=True):
+                for idx, cell in enumerate(row):
+                    if cell and str(cell).strip().lower() in ("vessel", "navio", "ship", "mv", "m/v", "nome"):
+                        vessel_col = idx
+                        break
+                if vessel_col is not None:
+                    break
+            if vessel_col is None:
+                vessel_col = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if vessel_col < len(row):
+                    name_val = row[vessel_col]
+                    if name_val:
+                        name = str(name_val).strip()
+                        if name.lower() not in SKIP_WORDS and not name.replace(".", "").isdigit():
+                            last_val = str(row[-1]).strip() if row[-1] else ""
+                            result[name.upper()] = last_val
+        return result
+    except Exception:
+        return {}
+
+
+def extract_fleet_from_excel(data: bytes) -> list:
+    """Extrai nomes dos navios do Excel da position list."""
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
+        SKIP_WORDS = {"vessel", "navio", "ship", "mv", "m/v", "nome", "name", "date",
+                      "porto", "port", "status", "eta", "etd", "none", "n/a", ""}
+        vessels = []
+        for sheet in wb.sheetnames:
+            ws = wb[sheet]
+            vessel_col = None
+            # find column header matching vessel/navio
+            for row in ws.iter_rows(min_row=1, max_row=5, values_only=True):
+                for idx, cell in enumerate(row):
+                    if cell and str(cell).strip().lower() in ("vessel", "navio", "ship", "mv", "m/v", "nome"):
+                        vessel_col = idx
+                        break
+                if vessel_col is not None:
+                    break
+            # if no header found, assume first column
+            if vessel_col is None:
+                vessel_col = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if vessel_col < len(row):
+                    val = row[vessel_col]
+                    if val:
+                        name = str(val).strip()
+                        if name.lower() not in SKIP_WORDS and not name.replace(".", "").isdigit():
+                            vessels.append(name.upper())
+        return list(dict.fromkeys(vessels))  # deduplicate preserving order
+    except Exception:
+        return []
+
+
 def fetch_cristiano_positions(mail_conn):
     pbd = previous_business_day()
     since = pbd.strftime("%d-%b-%Y")
 
-    _, ids = mail_conn.search(None, f'(FROM "{CRISTIANO_EMAIL}" SINCE {since})')
-    if not ids[0]:
-        return None, None
+    all_ids = []
+    for sender in POSITION_LIST_SENDERS:
+        _, ids = mail_conn.search(None, f'(FROM "{sender}" SINCE {since})')
+        if ids[0]:
+            all_ids.extend(ids[0].split())
 
-    for msg_id in reversed(ids[0].split()):
+    if not all_ids:
+        return None, None, []
+
+    for msg_id in reversed(all_ids):
         _, msg_data = mail_conn.fetch(msg_id, "(RFC822)")
         msg = email.message_from_bytes(msg_data[0][1])
         subject = decode_header_value(msg.get("Subject", ""))
         date_str = msg.get("Date", "")
+        sender_addr = msg.get("From", "")
 
         for part in msg.walk():
             fn = part.get_filename()
@@ -77,8 +150,10 @@ def fetch_cristiano_positions(mail_conn):
                     payload = part.get_payload(decode=True)
                     if payload:
                         text = excel_to_text(payload)
-                        return text, f"De: {CRISTIANO_EMAIL} | Data: {date_str} | Assunto: {subject}"
-    return None, None
+                        fleet = extract_fleet_from_excel(payload)
+                        next_ports = extract_next_ports_from_excel(payload)
+                        return text, f"De: {sender_addr} | Data: {date_str} | Assunto: {subject}", fleet, next_ports
+    return None, None, [], {}
 
 
 def fetch_last_report(mail_conn):
@@ -179,7 +254,7 @@ def fetch_vessel_emails():
     mail.login(GMAIL_USER, GMAIL_APP_PASSWORD)
     mail.select("inbox")
 
-    positions_text, positions_meta = fetch_cristiano_positions(mail)
+    positions_text, positions_meta, fleet_from_excel, next_ports = fetch_cristiano_positions(mail)
     last_report, last_report_date = fetch_last_report(mail)
     fixture_recaps = fetch_fixture_recaps(mail)
 
@@ -213,13 +288,15 @@ def fetch_vessel_emails():
         emails.append({"subject": subject, "from": sender, "date": date_str, "body": body})
 
     mail.logout()
-    return emails, positions_text, positions_meta, last_report, last_report_date, fixture_recaps
+    return emails, positions_text, positions_meta, fleet_from_excel, next_ports, last_report, last_report_date, fixture_recaps
 
-def generate_report(emails, positions_text, positions_meta, last_report, last_report_date, fixture_recaps):
+
+def generate_report(emails, positions_text, positions_meta, fleet_from_excel, next_ports, last_report, last_report_date, fixture_recaps):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     today = datetime.now().strftime("%d/%m/%Y")
-    fleet_list = ", ".join(FLEET)
+    active_fleet = fleet_from_excel if fleet_from_excel else FLEET
+    fleet_list = ", ".join(active_fleet)
 
     email_content = "\n\n---\n\n".join([
         f"De: {e['from']}\nData: {e['date']}\nAssunto: {e['subject']}\n\n{e['body']}"
@@ -239,6 +316,23 @@ Toda informacao operacional deve vir exclusivamente dos emails.
 """
     else:
         positions_section = "\nPlanilha de posicoes do Cristiano: nao encontrada.\n"
+
+    if next_ports:
+        lines = []
+        for vessel, port in next_ports.items():
+            if port:
+                lines.append(f"  {vessel}: proximo porto = {port}")
+            else:
+                lines.append(f"  {vessel}: proxima viagem em aberto")
+        next_ports_section = f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STATUS DA PROXIMA VIAGEM (da planilha de posicoes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Use este dado APENAS para indicar se a proxima viagem esta fechada ou em aberto.
+{chr(10).join(lines)}
+"""
+    else:
+        next_ports_section = ""
 
     if last_report:
         last_report_section = f"""
@@ -272,16 +366,19 @@ REGRAS FUNDAMENTAIS:
 
 1. SEM DEDUCOES: Inclua APENAS informacoes confirmadas explicitamente nos emails.
    - Jamais deduza, infira ou suponha qualquer informacao.
-   - Se o ETA nao estiver no email, escreva "ETA nao informado".
+   - Se o ETA nao estiver no email, omita o campo ETA silenciosamente.
    - Em caso de duvida, omita ou indique "dado nao confirmado".
 
 2. NOMES DE PORTOS: Copie o nome do porto EXATAMENTE como aparece no email.
    - Nunca abrevie, trunce ou interprete nomes de portos.
    - Se o porto nao estiver claro no email, escreva "porto nao especificado".
 
-3. BUNKERS: Mencione bunkers SOMENTE se houver email concreto sobre o assunto
-   (cotacao, pedido ou confirmacao de fornecimento).
-   - Nunca mencione bunkers com base em anotacoes da planilha de posicoes.
+3. BUNKERS: Informe quantidade de bunker SOMENTE em dois momentos-chave:
+   a) Abastecimento realizado — o navio acabou de abastecer (confirmar quantidade e porto nos emails).
+   b) Necessidade iminente de decisao — nivel critico confirmado nos emails que exige acao (cotacao solicitada, pedido em andamento, agente alertando para nivel baixo).
+   - NUNCA informe ROB como dado rotineiro de status.
+   - NUNCA mencione bunkers com base na planilha de posicoes.
+   - Fora desses dois momentos, omita completamente qualquer referencia a bunkers.
 
 4. PLANILHA DE POSICOES: Use-a APENAS para identificar quais navios estao ativos.
    - NAO extraia informacoes operacionais da planilha (rota, ETA, status, bunkers).
@@ -298,16 +395,19 @@ OUTRAS REGRAS:
 - Seja conciso. Sem frases longas. Prefira bullet points curtos.
 - Evite siglas tecnicas sem explicacao.
 - Nao liste escalas futuras — apenas a proxima viagem imediata.
+- Nao mencione negociacoes em aberto, propostas ou indicacoes de carga nao fechadas — apenas viagens com fixture confirmado.
 - Nao repita informacoes do ultimo relatorio se nao houver atualizacao confirmada.
 - Sem duplicidades entre secoes: cada informacao aparece UMA unica vez, na secao mais adequada.
 - Questoes de viagens ANTERIORES (laytime, disputas, faturas, demurrage de voyages encerradas) NUNCA entram no bloco do navio.
   Estas questoes vao EXCLUSIVAMENTE na secao de pendencias no final. Sem excecoes.
 - Quando uma informacao nao estiver disponivel (contato, ETA, etc.), omitir silenciosamente — sem explicar entre parenteses o motivo da ausencia.
 
-A frota tem EXATAMENTE estes 7 navios — inclua TODOS, sem excecao:
+A frota tem EXATAMENTE estes {len(active_fleet)} navios — inclua TODOS, sem excecao:
 {fleet_list}
 
 {positions_section}
+
+{next_ports_section}
 
 {last_report_section}
 
@@ -325,7 +425,7 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {today}
 
 [NIVEL]  M/V [NOME]  —  VOY [XXX/XX]
   Status    [navegando / em porto / fundeado / retido / inativo / sem informacao]
-  Rota      [Porto de origem] -> [Porto de destino]  |  ETA [data hora ou "nao informado"]
+  Rota      [Porto de origem] -> [Porto de destino]  |  ETA [data hora, se confirmado nos emails]  |  [proxima viagem em aberto] (usar esta frase se a proxima viagem estiver em aberto conforme STATUS DA PROXIMA VIAGEM; omitir tudo se nao houver info)
   Carga     [tipo e quantidade]
 
   URGENTE                          <- so se houver algo critico confirmado
@@ -342,7 +442,7 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {today}
   - Tipo: [Voyage Charter / Time Charter]  |  Cliente: [se disponivel]
   - Carga: [tipo e quantidade, se voyage charter]
   - [Porto de carga] -> [Porto de descarga]
-  (omitir se nao houver informacao confirmada)
+  (omitir se nao houver fixture confirmado — nao incluir negociacoes em andamento)
 
   PENDENCIAS
   - [apenas acoes pontuais pendentes que ainda nao foram realizadas, confirmadas nos emails]
@@ -410,12 +510,14 @@ def send_report(report_text):
 
 
 def check_position_list_today(mail_conn):
-    """Verifica se chegou position list do Cristiano hoje."""
+    """Verifica se chegou position list do Cristiano ou Jerome hoje."""
     today = datetime.now().strftime("%d-%b-%Y")
-    _, ids = mail_conn.search(None, f'(FROM "{CRISTIANO_EMAIL}" SINCE {today})')
-    if not ids[0]:
-        return False
-    for msg_id in ids[0].split():
+    all_ids = []
+    for sender in POSITION_LIST_SENDERS:
+        _, ids = mail_conn.search(None, f'(FROM "{sender}" SINCE {today})')
+        if ids[0]:
+            all_ids.extend(ids[0].split())
+    for msg_id in all_ids:
         _, msg_data = mail_conn.fetch(msg_id, "(RFC822)")
         msg = email.message_from_bytes(msg_data[0][1])
         for part in msg.walk():
@@ -463,7 +565,7 @@ if __name__ == "__main__":
     mail.select("inbox")
 
     if not check_position_list_today(mail):
-        print("[INFO] Position list do Cristiano ainda nao chegou hoje. Aguardando.")
+        print("[INFO] Position list (Cristiano/Jerome) ainda nao chegou hoje. Aguardando.")
         mail.logout()
         exit(0)
 
@@ -474,8 +576,12 @@ if __name__ == "__main__":
     mail.logout()
 
     print("[INFO] Position list recebida. Gerando relatorio...")
-    emails, positions_text, positions_meta, last_report, last_report_date, fixture_recaps = fetch_vessel_emails()
+    emails, positions_text, positions_meta, fleet_from_excel, next_ports, last_report, last_report_date, fixture_recaps = fetch_vessel_emails()
     print(f"[INFO] {len(emails)} email(s) encontrado(s) nas ultimas 24h.")
+    if fleet_from_excel:
+        print(f"[INFO] Frota extraida da planilha: {', '.join(fleet_from_excel)}")
+    else:
+        print(f"[INFO] Frota padrao (fallback): {', '.join(FLEET)}")
     if positions_text:
         print(f"[INFO] Planilha de posicoes encontrada: {positions_meta}")
     else:
@@ -486,7 +592,7 @@ if __name__ == "__main__":
         print("[AVISO] Ultimo relatorio nao encontrado.")
     print(f"[INFO] Fixture recaps encontrados: {len(fixture_recaps)}")
 
-    report = generate_report(emails, positions_text, positions_meta, last_report, last_report_date, fixture_recaps)
+    report = generate_report(emails, positions_text, positions_meta, fleet_from_excel, next_ports, last_report, last_report_date, fixture_recaps)
     print("\n--- RELATORIO GERADO ---")
     print(report.encode("cp1252", errors="replace").decode("cp1252"))
     print("------------------------\n")
