@@ -56,38 +56,6 @@ def excel_to_text(data: bytes) -> str:
     return "\n".join(lines)
 
 
-def extract_next_ports_from_excel(data: bytes) -> dict:
-    """Extrai próximo porto por navio da última coluna da position list."""
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
-        SKIP_WORDS = {"vessel", "navio", "ship", "mv", "m/v", "nome", "name", "date",
-                      "porto", "port", "status", "eta", "etd", "none", "n/a", ""}
-        result = {}
-        for sheet in wb.sheetnames:
-            ws = wb[sheet]
-            vessel_col = None
-            for row in ws.iter_rows(min_row=1, max_row=5, values_only=True):
-                for idx, cell in enumerate(row):
-                    if cell and str(cell).strip().lower() in ("vessel", "navio", "ship", "mv", "m/v", "nome"):
-                        vessel_col = idx
-                        break
-                if vessel_col is not None:
-                    break
-            if vessel_col is None:
-                vessel_col = 0
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                if vessel_col < len(row):
-                    name_val = row[vessel_col]
-                    if name_val:
-                        name = str(name_val).strip()
-                        if name.lower() not in SKIP_WORDS and not name.replace(".", "").isdigit():
-                            last_val = str(row[-1]).strip() if row[-1] else ""
-                            result[name.upper()] = last_val
-        return result
-    except Exception:
-        return {}
-
-
 def extract_fleet_from_excel(data: bytes) -> list:
     """Extrai nomes dos navios do Excel da position list."""
     try:
@@ -151,9 +119,8 @@ def fetch_cristiano_positions(mail_conn):
                     if payload:
                         text = excel_to_text(payload)
                         fleet = extract_fleet_from_excel(payload)
-                        next_ports = extract_next_ports_from_excel(payload)
-                        return text, f"De: {sender_addr} | Data: {date_str} | Assunto: {subject}", fleet, next_ports
-    return None, None, [], {}
+                        return text, f"De: {sender_addr} | Data: {date_str} | Assunto: {subject}", fleet
+    return None, None, []
 
 
 def fetch_last_report(mail_conn):
@@ -254,7 +221,7 @@ def fetch_vessel_emails():
     mail.login(GMAIL_USER, GMAIL_APP_PASSWORD)
     mail.select("inbox")
 
-    positions_text, positions_meta, fleet_from_excel, next_ports = fetch_cristiano_positions(mail)
+    positions_text, positions_meta, fleet_from_excel = fetch_cristiano_positions(mail)
     last_report, last_report_date = fetch_last_report(mail)
     fixture_recaps = fetch_fixture_recaps(mail)
 
@@ -288,10 +255,10 @@ def fetch_vessel_emails():
         emails.append({"subject": subject, "from": sender, "date": date_str, "body": body})
 
     mail.logout()
-    return emails, positions_text, positions_meta, fleet_from_excel, next_ports, last_report, last_report_date, fixture_recaps
+    return emails, positions_text, positions_meta, fleet_from_excel, last_report, last_report_date, fixture_recaps
 
 
-def generate_report(emails, positions_text, positions_meta, fleet_from_excel, next_ports, last_report, last_report_date, fixture_recaps):
+def generate_report(emails, positions_text, positions_meta, fleet_from_excel, last_report, last_report_date, fixture_recaps):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     today = datetime.now().strftime("%d/%m/%Y")
@@ -316,23 +283,6 @@ Toda informacao operacional deve vir exclusivamente dos emails.
 """
     else:
         positions_section = "\nPlanilha de posicoes do Cristiano: nao encontrada.\n"
-
-    if next_ports:
-        lines = []
-        for vessel, port in next_ports.items():
-            if port:
-                lines.append(f"  {vessel}: proximo porto = {port}")
-            else:
-                lines.append(f"  {vessel}: proxima viagem em aberto")
-        next_ports_section = f"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STATUS DA PROXIMA VIAGEM (da planilha de posicoes)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Use este dado APENAS para indicar se a proxima viagem esta fechada ou em aberto.
-{chr(10).join(lines)}
-"""
-    else:
-        next_ports_section = ""
 
     if last_report:
         last_report_section = f"""
@@ -395,7 +345,7 @@ OUTRAS REGRAS:
 - Seja conciso. Sem frases longas. Prefira bullet points curtos.
 - Evite siglas tecnicas sem explicacao.
 - Nao liste escalas futuras — apenas a proxima viagem imediata.
-- Nao mencione negociacoes em aberto, propostas ou indicacoes de carga nao fechadas — apenas viagens com fixture confirmado.
+- Negociacoes em andamento confirmadas nos emails: mencionar com 🔄 Em negociacao, brevemente. Nunca tratar como fixture confirmado.
 - Nao repita informacoes do ultimo relatorio se nao houver atualizacao confirmada.
 - Sem duplicidades entre secoes: cada informacao aparece UMA unica vez, na secao mais adequada.
 - Questoes de viagens ANTERIORES (laytime, disputas, faturas, demurrage de voyages encerradas) NUNCA entram no bloco do navio.
@@ -406,8 +356,6 @@ A frota tem EXATAMENTE estes {len(active_fleet)} navios — inclua TODOS, sem ex
 {fleet_list}
 
 {positions_section}
-
-{next_ports_section}
 
 {last_report_section}
 
@@ -425,7 +373,7 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {today}
 
 [NIVEL]  M/V [NOME]  —  VOY [XXX/XX]
   Status    [navegando / em porto / fundeado / retido / inativo / sem informacao]
-  Rota      [Porto de origem] -> [Porto de destino]  |  ETA [data hora, se confirmado nos emails]  |  [proxima viagem em aberto] (usar esta frase se a proxima viagem estiver em aberto conforme STATUS DA PROXIMA VIAGEM; omitir tudo se nao houver info)
+  Rota      [Porto de origem] -> [Porto de destino]  |  ETA [data hora, se confirmado nos emails]
   Carga     [tipo e quantidade]
 
   URGENTE                          <- so se houver algo critico confirmado
@@ -439,10 +387,12 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {today}
   - se nao houver informacao nova confirmada, escreva "sem atualizacao confirmada"
 
   PROXIMA VIAGEM
-  - Tipo: [Voyage Charter / Time Charter]  |  Cliente: [se disponivel]
-  - Carga: [tipo e quantidade, se voyage charter]
-  - [Porto de carga] -> [Porto de descarga]
-  (omitir se nao houver fixture confirmado — nao incluir negociacoes em andamento)
+  - Se fixture confirmado:
+    Tipo: [Voyage Charter / Time Charter]  |  Cliente: [se disponivel]
+    Carga: [tipo e quantidade, se voyage charter]
+    [Porto de carga] -> [Porto de descarga]
+  - Se em negociacao (sem fixture assinado): 🔄 Em negociacao — [breve descricao se disponivel]
+  (omitir secao inteira se nao houver nenhuma informacao sobre proxima viagem)
 
   PENDENCIAS
   - [apenas acoes pontuais pendentes que ainda nao foram realizadas, confirmadas nos emails]
@@ -576,7 +526,7 @@ if __name__ == "__main__":
     mail.logout()
 
     print("[INFO] Position list recebida. Gerando relatorio...")
-    emails, positions_text, positions_meta, fleet_from_excel, next_ports, last_report, last_report_date, fixture_recaps = fetch_vessel_emails()
+    emails, positions_text, positions_meta, fleet_from_excel, last_report, last_report_date, fixture_recaps = fetch_vessel_emails()
     print(f"[INFO] {len(emails)} email(s) encontrado(s) nas ultimas 24h.")
     if fleet_from_excel:
         print(f"[INFO] Frota extraida da planilha: {', '.join(fleet_from_excel)}")
@@ -592,7 +542,7 @@ if __name__ == "__main__":
         print("[AVISO] Ultimo relatorio nao encontrado.")
     print(f"[INFO] Fixture recaps encontrados: {len(fixture_recaps)}")
 
-    report = generate_report(emails, positions_text, positions_meta, fleet_from_excel, next_ports, last_report, last_report_date, fixture_recaps)
+    report = generate_report(emails, positions_text, positions_meta, fleet_from_excel, last_report, last_report_date, fixture_recaps)
     print("\n--- RELATORIO GERADO ---")
     print(report.encode("cp1252", errors="replace").decode("cp1252"))
     print("------------------------\n")
