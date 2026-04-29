@@ -392,7 +392,7 @@ LYRA SHIPPING  ·  RELATORIO DIARIO  ·  {today}
     Carga: [tipo e quantidade, se voyage charter]
     [Porto de carga] -> [Porto de descarga]
   - Se em negociacao (sem fixture assinado): 🔄 Em negociacao — [breve descricao se disponivel]
-  (omitir secao inteira se nao houver nenhuma informacao sobre proxima viagem)
+  - Se nao houver nenhuma informacao sobre proxima viagem: Em aberto
 
   PENDENCIAS
   - [apenas acoes pontuais pendentes que ainda nao foram realizadas, confirmadas nos emails]
