@@ -344,7 +344,7 @@ OUTRAS REGRAS:
 - Use APENAS texto simples com os separadores abaixo.
 - Seja conciso. Sem frases longas. Prefira bullet points curtos.
 - Evite siglas tecnicas sem explicacao.
-- Nao liste escalas futuras — apenas a proxima viagem imediata.
+- PROXIMA VIAGEM = apenas a viagem imediatamente apos a atual. Nunca mencionar a proxima da proxima, mesmo que ja esteja fechada.
 - Negociacoes em andamento confirmadas nos emails: mencionar com 🔄 Em negociacao, brevemente. Nunca tratar como fixture confirmado.
 - Nao repita informacoes do ultimo relatorio se nao houver atualizacao confirmada.
 - Sem duplicidades entre secoes: cada informacao aparece UMA unica vez, na secao mais adequada.
