@@ -262,7 +262,7 @@ def generate_report(emails, positions_text, positions_meta, fleet_from_excel, la
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     today = datetime.now().strftime("%d/%m/%Y")
-    active_fleet = fleet_from_excel if fleet_from_excel else FLEET
+    active_fleet = FLEET
     fleet_list = ", ".join(active_fleet)
 
     email_content = "\n\n---\n\n".join([
