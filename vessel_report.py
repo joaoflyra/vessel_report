@@ -57,7 +57,7 @@ def excel_to_text(data: bytes) -> str:
 
 
 def extract_fleet_from_excel(data: bytes) -> list:
-    """Extrai nomes dos navios do Excel da position list."""
+    """Extrai nomes dos navios do Excel da position list — apenas celulas em negrito na coluna vessel."""
     try:
         wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
         SKIP_WORDS = {"vessel", "navio", "ship", "mv", "m/v", "nome", "name", "date",
@@ -66,25 +66,23 @@ def extract_fleet_from_excel(data: bytes) -> list:
         for sheet in wb.sheetnames:
             ws = wb[sheet]
             vessel_col = None
-            # find column header matching vessel/navio
-            for row in ws.iter_rows(min_row=1, max_row=5, values_only=True):
+            for row in ws.iter_rows(min_row=1, max_row=5):
                 for idx, cell in enumerate(row):
-                    if cell and str(cell).strip().lower() in ("vessel", "navio", "ship", "mv", "m/v", "nome"):
-                        vessel_col = idx
+                    if cell.value and str(cell.value).strip().lower() in ("vessel", "navio", "ship", "mv", "m/v", "nome"):
+                        vessel_col = idx + 1  # openpyxl e 1-based para iter por coluna
                         break
                 if vessel_col is not None:
                     break
-            # if no header found, assume first column
             if vessel_col is None:
-                vessel_col = 0
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                if vessel_col < len(row):
-                    val = row[vessel_col]
-                    if val:
-                        name = str(val).strip()
+                vessel_col = 1
+            for row in ws.iter_rows(min_row=2):
+                if vessel_col <= len(row):
+                    cell = row[vessel_col - 1]
+                    if cell.value and cell.font and cell.font.bold:
+                        name = str(cell.value).strip()
                         if name.lower() not in SKIP_WORDS and not name.replace(".", "").isdigit():
                             vessels.append(name.upper())
-        return list(dict.fromkeys(vessels))  # deduplicate preserving order
+        return list(dict.fromkeys(vessels))
     except Exception:
         return []
 
@@ -262,7 +260,7 @@ def generate_report(emails, positions_text, positions_meta, fleet_from_excel, la
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     today = datetime.now().strftime("%d/%m/%Y")
-    active_fleet = FLEET
+    active_fleet = fleet_from_excel if fleet_from_excel else FLEET
     fleet_list = ", ".join(active_fleet)
 
     email_content = "\n\n---\n\n".join([
