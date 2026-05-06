@@ -517,6 +517,7 @@ if __name__ == "__main__":
         mail.logout()
         exit(0)
 
+    if check_report_already_sent_today(mail):
         print("[INFO] Relatorio ja enviado hoje. Nada a fazer.")
         mail.logout()
         exit(0)
